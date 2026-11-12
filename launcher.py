@@ -104,12 +104,7 @@ def menu_utama(license_info):
             border_style="blue"
         ))
 
-       if not active_packages:
-    console.print("[bold red]Tidak ada aplikasi Roblox yang terdeteksi di HP ini![/bold red]")
-    Prompt.ask("Tekan Enter untuk muat ulang...")
-    packages = detect_roblox_packages()
-    active_packages = packages[:max_inst]
-    continue
+       
 
         table = Table(show_header=True, header_style="bold white")
         table.add_column("No", width=4)
