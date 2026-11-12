@@ -59,12 +59,12 @@ def verify_license(user_key):
         return False, f"Terjadi kesalahan koneksi: {e}"
 
 def detect_roblox_packages():
-    """Mendeteksi otomatis paket roblox dan zetsu client"""
+    """Mendeteksi semua aplikasi yang mengandung kata roblox"""
     try:
         output = subprocess.check_output("pm list packages", shell=True, universal_newlines=True)
         packages = []
         for line in output.splitlines():
-            if "roblox" in line.lower() or "zetsu" in line.lower():
+            if "roblox" in line.lower():
                 pkg = line.replace("package:", "").strip()
                 packages.append(pkg)
         return sorted(packages)
@@ -104,12 +104,12 @@ def menu_utama(license_info):
             border_style="blue"
         ))
 
-        if not active_packages:
-            console.print("[bold red]Tidak ada aplikasi Roblox (com.roblox.clien*) yang terdeteksi![/bold red]")
-            Prompt.ask("\nTekan Enter untuk muat ulang...")
-            packages = detect_roblox_packages()
-            active_packages = packages[:max_inst]
-            continue
+       if not active_packages:
+    console.print("[bold red]Tidak ada aplikasi Roblox yang terdeteksi di HP ini![/bold red]")
+    Prompt.ask("Tekan Enter untuk muat ulang...")
+    packages = detect_roblox_packages()
+    active_packages = packages[:max_inst]
+    continue
 
         table = Table(show_header=True, header_style="bold white")
         table.add_column("No", width=4)
