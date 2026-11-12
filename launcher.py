@@ -59,10 +59,14 @@ def verify_license(user_key):
         return False, f"Terjadi kesalahan koneksi: {e}"
 
 def detect_roblox_packages():
-    """Mendeteksi otomatis paket com.roblox.client dan semua kloningannya (com.roblox.clien...)"""
+    """Mendeteksi otomatis paket roblox dan zetsu client"""
     try:
-        output = subprocess.check_output("pm list packages | grep com.roblox.clien", shell=True).decode()
-        packages = [line.replace("package:", "").strip() for line in output.splitlines() if line.strip()]
+        output = subprocess.check_output("pm list packages", shell=True, universal_newlines=True)
+        packages = []
+        for line in output.splitlines():
+            if "roblox" in line.lower() or "zetsu" in line.lower():
+                pkg = line.replace("package:", "").strip()
+                packages.append(pkg)
         return sorted(packages)
     except subprocess.CalledProcessError:
         return []
