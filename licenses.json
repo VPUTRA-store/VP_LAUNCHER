@@ -4,5 +4,11 @@
     "expired": "permanent",
     "hwid": "",
     "max_instances": 4
+  },
+  "buyerarka": {
+    "status": "active",
+    "expired": "2026-11-17",
+    "hwid": "",
+    "max_instances": 4
   }
 }
