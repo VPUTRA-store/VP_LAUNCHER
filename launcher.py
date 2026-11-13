@@ -123,7 +123,7 @@ def menu_utama(license_info):
         console.print("[4] Force Stop Semua Sekarang")
         console.print("[0] Keluar")
 
-        pilihan = Prompt.ask("\nMasukkan pilihan", choices=["0", "1", "2", "3", "4"])
+        pilihan = input("\nMasukkan pilihan [0/1/2/3/4]: ").strip()
 
         if pilihan == "1":
             delay = int(Prompt.ask("Delay antar launch (detik)", default="3"))
@@ -179,7 +179,7 @@ def main():
     console.print(Panel.fit("[bold blue]VPUTRA STORE - AUTHENTICATION SYSTEM[/bold blue]", border_style="white"))
     console.print(f"[dim]Device HWID: {get_hwid()}[/dim]\n")
 
-    user_key = Prompt.ask("[bold white]Masukkan License Key Anda[/bold white]").strip()
+    user_key = input("Masukkan License Key Anda: ").strip()
     console.print("[yellow]Memverifikasi lisensi...[/yellow]")
 
     valid, result = verify_license(user_key)
