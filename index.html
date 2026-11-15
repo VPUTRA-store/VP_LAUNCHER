@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>VP Launcher</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0f172a">
+  <style>
+    * { box-sizing: border-box; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; }
+    body { background: #090d16; color: #f8fafc; padding: 20px; display: flex; flex-direction: column; min-height: 100vh; }
+    .header { text-align: center; padding: 20px 0; border-bottom: 1px solid #1e293b; margin-bottom: 20px; }
+    .header h1 { font-size: 24px; letter-spacing: 2px; color: #38bdf8; text-transform: uppercase; }
+    .header p { font-size: 12px; color: #64748b; margin-top: 4px; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 14px; padding: 18px; margin-bottom: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.4); }
+    .label { font-size: 12px; color: #94a3b8; margin-bottom: 8px; display: block; font-weight: 600; }
+    input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #fff; font-size: 15px; outline: none; margin-bottom: 12px; }
+    input:focus { border-color: #38bdf8; }
+    .btn { width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer; transition: 0.2s; text-transform: uppercase; letter-spacing: 1px; }
+    .btn-primary { background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; }
+    .btn-primary:active { transform: scale(0.98); }
+    .btn-launch { background: linear-gradient(135deg, #16a34a, #22c55e); color: #fff; font-size: 16px; padding: 16px; margin-top: 10px; }
+    .btn-danger { background: #dc2626; color: #fff; margin-top: 10px; font-size: 13px; padding: 10px; }
+    .status-box { padding: 10px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; display: none; }
+    .status-ok { background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #4ade80; }
+    .status-err { background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
+    .hidden { display: none; }
+    .info-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid #1e293b; }
+    .log-box { background: #05080f; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; color: #38bdf8; min-height: 80px; margin-top: 12px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>VP LAUNCHER</h1>
+    <p>Multi-Instance Control Panel</p>
+  </div>
+
+  <!-- LOGIN LICENSE -->
+  <div id="loginSection" class="card">
+    <span class="label">MASUKKAN LICENSE KEY</span>
+    <input type="text" id="keyInput" placeholder="Contoh: VP-3FMP-38NI">
+    <div id="loginStatus" class="status-box"></div>
+    <button class="btn btn-primary" onclick="verifyKey()">VERIFIKASI LISENSI</button>
+  </div>
+
+  <!-- DASHBOARD UTAMA -->
+  <div id="panelSection" class="hidden">
+    <div class="card">
+      <div class="info-row"><span>Status Lisensi</span><strong style="color:#4ade80;">AKTIF</strong></div>
+      <div class="info-row"><span>Owner</span><strong id="ownerText">-</strong></div>
+      <div class="info-row" style="border:none;"><span>Expired</span><strong id="expText">-</strong></div>
+    </div>
+
+    <div class="card">
+      <span class="label">PENGATURAN TIMER JEDA (DETIK)</span>
+      <input type="number" id="delayInput" value="12" min="1" max="120">
+      
+      <button class="btn btn-launch" onclick="startLaunch()">▶ LAUNCH ALL ROBLOX</button>
+      <div id="logOutput" class="log-box">Siap digunakan. Tekan tombol Launch di atas...</div>
+    </div>
+
+    <button class="btn btn-danger" onclick="logoutKey()">GANTI / RESET LICENSE KEY</button>
+  </div>
+
+  <script>
+    const LICENSE_URL = "https://raw.githubusercontent.com/VPUTRA-store/VP_LAUNCHER/main/licenses.json";
+
+    window.onload = () => {
+      const saved = localStorage.getItem("vp_key");
+      if (saved) {
+        document.getElementById("keyInput").value = saved;
+        verifyKey(true);
+      }
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js');
+      }
+    };
+
+    async function verifyKey(auto = false) {
+      const key = document.getElementById("keyInput").value.trim();
+      const statusBox = document.getElementById("loginStatus");
+      if (!key) return;
+
+      statusBox.style.display = "block";
+      statusBox.className = "status-box status-ok";
+      statusBox.innerText = "Memeriksa lisensi ke server...";
+
+      try {
+        const res = await fetch(`${LICENSE_URL}?t=${Date.now()}`);
+        const data = await res.json();
+
+        if (data[key] && data[key].status === "active") {
+          localStorage.setItem("vp_key", key);
+          document.getElementById("ownerText").innerText = data[key].owner || "Member";
+          document.getElementById("expText").innerText = data[key].expires || "-";
+          document.getElementById("loginSection").classList.add("hidden");
+          document.getElementById("panelSection").classList.remove("hidden");
+        } else {
+          localStorage.removeItem("vp_key");
+          statusBox.className = "status-box status-err";
+          statusBox.innerText = "License Key tidak valid atau sudah nonaktif!";
+        }
+      } catch (e) {
+        statusBox.className = "status-box status-err";
+        statusBox.innerText = "Gagal terhubung ke server GitHub.";
+      }
+    }
+
+    function startLaunch() {
+      const delay = document.getElementById("delayInput").value || 12;
+      const log = document.getElementById("logOutput");
+      log.innerText = `[*] Memulai proses dengan jeda ${delay} detik...\n[*] Mencoba membuka client utama Roblox...`;
+      
+      // Mencoba deep link membuka aplikasi Roblox
+      window.location.href = "roblox://";
+      
+      setTimeout(() => {
+        log.innerText += `\n[i] Catatan: Untuk multi-clone otomatis, pastikan bridge Termux aktif di background.`;
+      }, 1500);
+    }
+
+    function logoutKey() {
+      localStorage.removeItem("vp_key");
+      location.reload();
+    }
+  </script>
+</body>
+</html>
