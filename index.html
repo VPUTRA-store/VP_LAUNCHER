@@ -95,7 +95,7 @@
       <input type="number" id="totalInstancesInput" value="3" min="1" max="26" onchange="renderInstances()" style="margin-bottom:10px;">
 
       <label style="font-size:11px; color:var(--gray-text); display:block; margin-bottom:4px;">Jeda Waktu Antar Launch (Detik)</label>
-      <input type="number" id="delayInput" value="3" min="1" max="60" style="margin-bottom:10px;">
+      <input type="number" id="delayInput" value="4" min="2" max="60" style="margin-bottom:10px;">
       
       <label style="font-size:11px; color:var(--gray-text); display:block; margin-bottom:4px;">Discord Webhook URL</label>
       <input type="text" id="webhookUrlInput" placeholder="https://discord.com/api/webhooks/..." style="margin-bottom:10px;">
@@ -231,58 +231,55 @@
       }).catch(err => console.log(err));
     }
 
+    // Auto-Launch Sequence yang dioptimalkan untuk Android / Redfinger
     function startMultiInstance() {
       const count = parseInt(document.getElementById("totalInstancesInput").value) || 3;
-      const delay = parseInt(document.getElementById("delayInput").value) || 3;
+      const delay = parseInt(document.getElementById("delayInput").value) || 4;
       const autoRejoin = document.getElementById("autoRejoinToggle").checked;
       const log = document.getElementById("logOutput");
 
       log.innerText = `[+] Memulai ${count} Instance Roblox secara berurutan...\n`;
 
-      for (let i = 1; i <= count; i++) {
-        const pkgName = document.getElementById(`pkg${i}`).value.trim();
-        const isTimerOn = document.getElementById(`timerEnable${i}`).checked;
-        
-        log.innerText += `[+] Roblox ${i} [${pkgName}] -> `;
-        if (isTimerOn) {
-          const d = parseInt(document.getElementById(`d${i}`).value) || 0;
-          const h = parseInt(document.getElementById(`h${i}`).value) || 0;
-          const m = parseInt(document.getElementById(`m${i}`).value) || 0;
-          log.innerText += `Timer: ${d}H ${h}J ${m}M\n`;
-        } else {
-          log.innerText += `Timer Leave: NONAKTIF\n`;
-        }
-      }
-
       let step = 1;
-      const interval = setInterval(() => {
+      const launchNext = () => {
         if (step <= count) {
           const pkgName = document.getElementById(`pkg${step}`).value.trim();
-          log.innerText += `[*] Meluncurkan Roblox ${step} (${pkgName})...\n`;
-          log.scrollTop = log.scrollHeight;
+          const isTimerOn = document.getElementById(`timerEnable${step}`).checked;
           
-          // Menggunakan Hidden Iframe agar looping berjalan lancar tanpa menutup halaman web
+          log.innerText += `[*] Meluncurkan Roblox ${step} (${pkgName})...\n`;
+          if (isTimerOn) {
+            const d = parseInt(document.getElementById(`d${step}`).value) || 0;
+            const h = parseInt(document.getElementById(`h${step}`).value) || 0;
+            const m = parseInt(document.getElementById(`m${step}`).value) || 0;
+            log.innerText += `    └─ Timer: ${d}H ${h}J ${m}M (AKTIF)\n`;
+          }
+          log.scrollTop = log.scrollHeight;
+
+          // Eksekusi Intent menggunakan iframe dinamis bersih
           const iframe = document.createElement('iframe');
           iframe.style.display = 'none';
           iframe.src = `intent://#Intent;package=${pkgName};scheme=roblox;end;`;
           document.body.appendChild(iframe);
-          setTimeout(() => { iframe.remove(); }, 2000);
-          
+          setTimeout(() => { iframe.remove(); }, 1000);
+
           step++;
+          // Menggunakan setTimeout bertahap agar aman dari background throttling Android
+          setTimeout(launchNext, delay * 1000);
         } else {
-          clearInterval(interval);
-          log.innerText += `[✔] Semua ${count} Instance berhasil diluncurkan & dipantau!\n`;
+          log.innerText += `[✔] Semua ${count} Instance berhasil dipicu ke sistem!\n`;
           log.scrollTop = log.scrollHeight;
-          
+
           if (autoRejoin) {
             setTimeout(() => {
               const randomInstance = Math.floor(Math.random() * count) + 1;
-              log.innerText += `[!] Roblox ${randomInstance} Mengalami Force Close & Diperbaiki!\n`;
+              log.innerText += `[!] Simulasi: Roblox ${randomInstance} Mengalami Force Close & Diperbaiki!\n`;
               sendDiscordAlert(randomInstance);
             }, 6000);
           }
         }
-      }, delay * 1000);
+      };
+
+      launchNext();
     }
 
     function logoutKey() {
