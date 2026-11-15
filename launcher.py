@@ -5,7 +5,6 @@ import os
 import sys
 import time
 import random
-import select
 import subprocess
 
 try:
@@ -25,10 +24,10 @@ def clear_screen():
 
 def print_banner():
     clear_screen()
-    print("=" * 55)
-    print("             VP LAUNCHER - PRO EDITION v4.0            ")
-    print("        AUTOMATED MULTI-INSTANCE ROBLOX SYSTEM         ")
-    print("=" * 55)
+    print("=" * 45)
+    print("          VP LAUNCHER - PRO EDITION          ")
+    print("     AUTOMATED MULTI-INSTANCE ROBLOX         ")
+    print("=" * 45)
 
 def verify_license():
     saved_key = ""
@@ -38,20 +37,20 @@ def verify_license():
 
     if not saved_key:
         print("\n[!] Lisensi belum terdaftar di perangkat ini.")
-        print("[?] Silakan masukkan License Key Anda lalu tekan Enter:")
+        print("[?] Masukkan License Key lalu tekan Enter:")
         sys.stdout.write("    Key > ")
         sys.stdout.flush()
         saved_key = sys.stdin.readline().strip()
 
     if not saved_key:
-        print("\n[✖] License Key tidak boleh kosong!")
+        print("\n[X] License Key tidak boleh kosong!")
         return False
 
     print("\n[*] Memverifikasi lisensi ke server...")
     try:
         resp = requests.get(f"{LICENSE_URL}?t={int(time.time())}", timeout=10)
         if resp.status_code != 200:
-            print("[✖] Gagal terhubung ke server lisensi. Periksa koneksi internet.")
+            print("[X] Gagal terhubung ke server lisensi.")
             return False
 
         licenses = resp.json()
@@ -59,20 +58,20 @@ def verify_license():
             with open(KEY_FILE, "w") as f:
                 f.write(saved_key)
             owner = licenses[saved_key].get("owner", "Member")
-            print(f"[✔] Lisensi Valid! Selamat datang, {owner}.")
+            print(f"[OK] Lisensi Valid! Selamat datang, {owner}.")
             return True
         else:
             if os.path.exists(KEY_FILE):
                 os.remove(KEY_FILE)
-            print("[✖] License Key tidak valid atau sudah dinonaktifkan!")
+            print("[X] License Key tidak valid atau nonaktif!")
             return False
     except Exception as e:
-        print(f"[✖] Terjadi kesalahan jaringan saat verifikasi: {e}")
+        print(f"[X] Kesalahan jaringan saat verifikasi: {e}")
         return False
 
 def scan_roblox_packages():
     packages = []
-    # Metode 1: os.popen dengan su -c (paling stabil di Redfinger)
+    # Metode 1: os.popen dengan su -c
     try:
         stream = os.popen("su -c 'pm list packages'")
         output = stream.read()
@@ -104,30 +103,29 @@ def scan_roblox_packages():
     return sorted(packages)
 
 def launch_package(pkg_name):
-    # Independen DPI & resolusi menggunakan intent launcher sistem Android
     cmd = f"su -c 'monkey -p {pkg_name} -c android.intent.category.LAUNCHER 1'"
     os.system(cmd)
 
 def main():
     print_banner()
     if not verify_license():
-        print("=" * 55)
+        print("=" * 45)
         sys.exit(1)
 
-    print("-" * 55)
-    print("[*] Memindai seluruh client Roblox di perangkat...")
+    print("-" * 45)
+    print("[*] Memindai seluruh client Roblox...")
     packages = scan_roblox_packages()
 
     if not packages:
-        print("\n[!] Tidak ada package com.roblox yang terdeteksi!")
-        print("[!] Pastikan aplikasi game terinstal & izin root (su) aktif.")
-        print("=" * 55)
+        print("\n[!] Tidak ada package com.roblox terdeteksi!")
+        print("[!] Pastikan game terinstal & akses root aktif.")
+        print("=" * 45)
         return
 
-    print(f"[+] Terdeteksi {len(packages)} client Roblox (Unlimited Mode).")
-    print("[i] Sistem akan otomatis berjalan dalam 3 detik...")
+    print(f"[+] Terdeteksi {len(packages)} client (Unlimited).")
+    print("[i] Sistem berjalan otomatis dalam 3 detik...")
     time.sleep(3)
-    print("-" * 55)
+    print("-" * 45)
 
     for idx, pkg in enumerate(packages, start=1):
         print(f"[{idx}/{len(packages)}] Membuka: {pkg}")
@@ -135,12 +133,12 @@ def main():
 
         if idx < len(packages):
             delay = random.randint(10, 15)
-            print(f"      └─ Jeda aman {delay} detik sebelum client berikutnya...")
+            print(f"    -> Jeda aman {delay} detik...")
             time.sleep(delay)
 
-    print("-" * 55)
-    print("[✔] Seluruh client berhasil diluncurkan secara otomatis!")
-    print("=" * 55)
+    print("-" * 45)
+    print("[OK] Semua client berhasil diluncurkan!")
+    print("=" * 45)
 
 if __name__ == "__main__":
     try:
@@ -148,4 +146,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n[!] Dihentikan oleh pengguna.")
         sys.exit(0)
-      
+    
