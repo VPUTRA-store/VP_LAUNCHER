@@ -13,21 +13,13 @@ except ImportError:
     os.system("pip install requests -q")
     import requests
 
-# Konfigurasi Repository GitHub
 GITHUB_USER = "VPUTRA-store"
 REPO_NAME = "VP_LAUNCHER"
 LICENSE_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/main/licenses.json"
 KEY_FILE = os.path.expanduser("~/.vp_license_key")
 
 def clear_screen():
-    os.system('clear' if os.name != 'nt' else 'cls')
-
-def print_banner():
-    clear_screen()
-    print("=" * 45)
-    print("          VP LAUNCHER - PRO EDITION          ")
-    print("     AUTOMATED MULTI-INSTANCE ROBLOX         ")
-    print("=" * 45)
+    os.system('clear' if os.name == 'posix' else 'cls')
 
 def verify_license():
     saved_key = ""
@@ -37,10 +29,7 @@ def verify_license():
 
     if not saved_key:
         print("\n[!] Lisensi belum terdaftar di perangkat ini.")
-        print("[?] Masukkan License Key lalu tekan Enter:")
-        sys.stdout.write("    Key > ")
-        sys.stdout.flush()
-        saved_key = sys.stdin.readline().strip()
+        saved_key = input("    Masukkan License Key > ").strip()
 
     if not saved_key:
         print("\n[X] License Key tidak boleh kosong!")
@@ -59,19 +48,19 @@ def verify_license():
                 f.write(saved_key)
             owner = licenses[saved_key].get("owner", "Member")
             print(f"[OK] Lisensi Valid! Selamat datang, {owner}.")
+            time.sleep(1.5)
             return True
         else:
             if os.path.exists(KEY_FILE):
                 os.remove(KEY_FILE)
-            print("[X] License Key tidak valid atau nonaktif!")
+            print("[X] License Key tidak valid atau sudah nonaktif!")
             return False
     except Exception as e:
-        print(f"[X] Kesalahan jaringan saat verifikasi: {e}")
+        print(f"[X] Kesalahan jaringan: {e}")
         return False
 
 def scan_roblox_packages():
     packages = []
-    # Metode 1: os.popen dengan su -c
     try:
         stream = os.popen("su -c 'pm list packages'")
         output = stream.read()
@@ -85,7 +74,6 @@ def scan_roblox_packages():
     except Exception:
         pass
 
-    # Metode 2: Fallback tanpa tanda kutip tunggal
     if not packages:
         try:
             stream = os.popen("su pm list packages")
@@ -102,48 +90,96 @@ def scan_roblox_packages():
 
     return sorted(packages)
 
-def launch_package(pkg_name):
-    cmd = f"su -c 'monkey -p {pkg_name} -c android.intent.category.LAUNCHER 1'"
-    os.system(cmd)
-
-def main():
-    print_banner()
-    if not verify_license():
-        print("=" * 45)
-        sys.exit(1)
-
-    print("-" * 45)
-    print("[*] Memindai seluruh client Roblox...")
+def launch_all_packages(delay_time=12):
+    clear_screen()
+    print("=" * 45)
+    print("         MEMINDAI & MELUNCURKAN GAME         ")
+    print("=" * 45)
     packages = scan_roblox_packages()
 
     if not packages:
         print("\n[!] Tidak ada package com.roblox terdeteksi!")
-        print("[!] Pastikan game terinstal & akses root aktif.")
-        print("=" * 45)
+        print("[!] Pastikan Roblox sudah terinstal & root aktif.")
+        input("\nTekan Enter untuk kembali...")
         return
 
-    print(f"[+] Terdeteksi {len(packages)} client (Unlimited).")
-    print("[i] Sistem berjalan otomatis dalam 3 detik...")
-    time.sleep(3)
-    print("-" * 45)
-
+    print(f"[+] Ditemukan {len(packages)} client Roblox.")
+    print(f"[i] Jeda antar client: {delay_time} detik.")
+    print("=" * 45)
+    
     for idx, pkg in enumerate(packages, start=1):
         print(f"[{idx}/{len(packages)}] Membuka: {pkg}")
-        launch_package(pkg)
+        cmd = f"su -c 'monkey -p {pkg} -c android.intent.category.LAUNCHER 1'"
+        os.system(cmd)
 
         if idx < len(packages):
-            delay = random.randint(10, 15)
-            print(f"    -> Jeda aman {delay} detik...")
-            time.sleep(delay)
+            print(f"    └─ Menunggu {delay_time} detik...")
+            time.sleep(delay_time)
 
     print("-" * 45)
-    print("[OK] Semua client berhasil diluncurkan!")
+    print("[OK] Selesai! Semua client berhasil diluncurkan.")
     print("=" * 45)
+    input("\nTekan Enter untuk kembali ke menu...")
+
+def reset_license():
+    if os.path.exists(KEY_FILE):
+        os.remove(KEY_FILE)
+        print("\n[✔] Lisensi berhasil di-reset dari perangkat ini.")
+    else:
+        print("\n[!] Belum ada lisensi tersimpan.")
+    input("\nTekan Enter untuk kembali...")
+
+def main():
+    clear_screen()
+    if not verify_license():
+        sys.exit(1)
+
+    delay_sec = 12  # Default jeda timer aman
+
+    while True:
+        clear_screen()
+        print("=" * 45)
+        print("            VP LAUNCHER - PANEL              ")
+        print("=" * 45)
+        print(" [1] LAUNCH ALL ROBLOX (AUTO)")
+        print(f" [2] ATUR TIMER JEDA ({delay_sec} Detik)")
+        print(" [3] GANTI / RESET LICENSE KEY")
+        print(" [4] KELUAR")
+        print("=" * 45)
+        
+        choice = input("Pilih menu [1-4] > ").strip()
+        
+        if choice == '1':
+            launch_all_packages(delay_sec)
+        elif choice == '2':
+            clear_screen()
+            print("=" * 45)
+            print("            PENGATURAN TIMER                 ")
+            print("=" * 45)
+            try:
+                val = input("Masukkan waktu jeda dalam detik (Misal: 10 atau 15) > ").strip()
+                if val.isdigit() and int(val) > 0:
+                    delay_sec = int(val)
+                    print(f"\n[✔] Timer jeda berhasil diubah jadi {delay_sec} detik!")
+                else:
+                    print("\n[!] Masukkan angka yang valid.")
+            except Exception:
+                print("\n[!] Terjadi kesalahan input.")
+            input("\nTekan Enter untuk kembali...")
+        elif choice == '3':
+            reset_license()
+        elif choice == '4':
+            clear_screen()
+            print("Keluar dari VP Launcher. Sampai jumpa!")
+            break
+        else:
+            print("\n[!] Pilihan tidak valid.")
+            input("Tekan Enter...")
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n[!] Dihentikan oleh pengguna.")
+        print("\n[!] Dihentikan.")
         sys.exit(0)
-    
+        
