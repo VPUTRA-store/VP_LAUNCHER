@@ -11,6 +11,7 @@ KEY_URL="https://raw.githubusercontent.com/VPUTRA-store/VP_LAUNCHER/main/keys.tx
 
 WEBHOOK=""     # webhook Discord buyer (opsional)
 PLACE_URL=""   # link map untuk fitur re join
+DELAY_DETIK=10 # jeda antar Roblox saat dibuka (bisa diatur buyer di menu)
 PAKET=()       # daftar aplikasi Roblox yang terdeteksi
 declare -A TIMER_MENIT   # timer per aplikasi (menit). 0 = tanpa timer
 declare -A MULAI         # kapan aplikasi terakhir diluncurkan
@@ -152,10 +153,9 @@ buka() {
   MULAI[$p]=$(date +%s)
 }
 
-jeda_acak() {
-  local d=$((RANDOM % 11 + 5))   # 5 sampai 15 detik
-  echo "   jeda ${d} detik..."
-  sleep "$d"
+jeda() {
+  echo "   jeda ${DELAY_DETIK} detik..."
+  sleep "$DELAY_DETIK"
 }
 
 launch_semua() {
@@ -175,7 +175,7 @@ launch_semua() {
     echo "[$i/${#PAKET[@]}] Membuka $p"
     SELESAI[$p]=0
     buka "$p"
-    if [ $i -lt ${#PAKET[@]} ]; then jeda_acak; fi
+    if [ $i -lt ${#PAKET[@]} ]; then jeda; fi
   done
   echo
   echo "Semua Roblox sudah dibuka."
@@ -220,7 +220,7 @@ pantau() {
           tulis "[$(date +%T)] $p mati -> diluncurkan ulang"
           kirim_webhook "$p mati, diluncurkan ulang ke map terakhir."
           buka "$p"
-          jeda_acak
+          jeda
         fi
       fi
     done
@@ -293,6 +293,54 @@ menu_timer() {
   tunggu_enter
 }
 
+menu_delay() {
+  header
+  tulis "ATUR DELAY antar Roblox saat dibuka"
+  tulis "(rekomendasi 5-10 detik)"
+  echo
+  echo "Delay sekarang: ${DELAY_DETIK} detik"
+  read -r -p "Delay baru (detik): " d
+  if [ -z "$d" ]; then
+    echo "Tidak diubah."
+  elif [[ "$d" =~ ^[0-9]+$ ]] && [ "$d" -ge 1 ] && [ "$d" -le 120 ]; then
+    DELAY_DETIK=$d
+    echo "Delay diatur ke ${DELAY_DETIK} detik."
+    if [ "$d" -lt 5 ]; then
+      tulis "Peringatan: di bawah 5 detik berisiko membuat cloud crash."
+    fi
+  else
+    tulis "Harus angka 1 sampai 120."
+  fi
+  tunggu_enter
+}
+
+tutup_semua() {
+  header
+  cari_roblox
+  if [ ${#PAKET[@]} -eq 0 ]; then
+    tulis "Tidak ada Roblox (com.roblox) yang terdeteksi."
+    tunggu_enter
+    return
+  fi
+
+  echo "Terdeteksi ${#PAKET[@]} Roblox:"
+  for p in "${PAKET[@]}"; do echo " - $p"; done
+  echo
+  read -r -p "Tutup semua? (y/n): " jawab
+  if [[ "$jawab" =~ ^[yY]$ ]]; then
+    for p in "${PAKET[@]}"; do
+      echo "Menutup $p"
+      rt "am force-stop $p"
+    done
+    kirim_webhook "Semua Roblox ditutup."
+    echo
+    echo "Semua Roblox sudah ditutup."
+  else
+    echo "Dibatalkan."
+  fi
+  tunggu_enter
+}
+
 # ---------- Program utama ----------
 cek_key
 atur_webhook
@@ -300,11 +348,14 @@ atur_webhook
 while true; do
   header
   if [ -n "$WEBHOOK" ]; then echo "Webhook: aktif"; else echo "Webhook: tidak dipakai"; fi
+  echo "Delay  : ${DELAY_DETIK} detik"
   echo
   echo "1. AUTO LAUNCH"
   echo "2. AUTO LAUNCH + RE JOIN"
   echo "3. TIMER"
-  echo "4. KELUAR"
+  echo "4. ATUR DELAY"
+  echo "5. TUTUP SEMUA ROBLOX"
+  echo "6. KELUAR"
   echo
   read -r -p "Pilih: " PILIH
 
@@ -329,7 +380,9 @@ while true; do
       tunggu_enter
       ;;
     3) menu_timer ;;
-    4)
+    4) menu_delay ;;
+    5) tutup_semua ;;
+    6)
       echo "Sampai jumpa!"
       exit 0
       ;;
