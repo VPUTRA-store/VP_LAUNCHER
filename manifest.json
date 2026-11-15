@@ -8,9 +8,11 @@
   "orientation": "portrait",
   "icons": [
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/808/808439.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
-  ]
+      "icons": [
+  {
+    "src": "logo.png",
+    "sizes": "512x512",
+    "type": "vp.png"
+  }
+      ]
 }
