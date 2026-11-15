@@ -26,7 +26,7 @@
     .card { background: var(--bg-card); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6); }
     .label { font-size: 11px; color: var(--blue-light); margin-bottom: 6px; display: block; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
     
-    input[type="text"], input[type="number"] { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--blue-dark); background: #030712; color: var(--white); font-size: 13px; outline: none; }
+    input[type="text"], input[type="number"] { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--blue-dark); background: #030712; color: var(--white); font-size: 13px; outline: none; margin-bottom: 6px; }
     input:focus { border-color: var(--blue-neon); box-shadow: 0 0 8px rgba(0,243,255,0.3); }
     
     .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
@@ -91,11 +91,11 @@
     <div class="card">
       <span class="label">PENGATURAN GLOBAL</span>
       
-      <label style="font-size:11px; color:var(--gray-text); display:block; margin-bottom:4px;">Jumlah Akun Roblox (Otomatis)</label>
-      <input type="number" id="totalInstancesInput" value="3" min="1" max="15" onchange="renderInstances()" style="margin-bottom:10px;">
+      <label style="font-size:11px; color:var(--gray-text); display:block; margin-bottom:4px;">Jumlah Akun Roblox</label>
+      <input type="number" id="totalInstancesInput" value="3" min="1" max="26" onchange="renderInstances()" style="margin-bottom:10px;">
 
       <label style="font-size:11px; color:var(--gray-text); display:block; margin-bottom:4px;">Jeda Waktu Antar Launch (Detik)</label>
-      <input type="number" id="delayInput" value="5" min="1" max="60" style="margin-bottom:10px;">
+      <input type="number" id="delayInput" value="3" min="1" max="60" style="margin-bottom:10px;">
       
       <label style="font-size:11px; color:var(--gray-text); display:block; margin-bottom:4px;">Discord Webhook URL</label>
       <input type="text" id="webhookUrlInput" placeholder="https://discord.com/api/webhooks/..." style="margin-bottom:10px;">
@@ -106,9 +106,9 @@
       </div>
     </div>
 
-    <!-- PENGATURAN TIMER & DURASI DINAMIS PER INSTANCE -->
+    <!-- PENGATURAN PACKAGE NAME & TIMER PER INSTANCE -->
     <div class="card">
-      <span class="label">TIMER LEAVE & SAKLAR PER INSTANCE</span>
+      <span class="label">PACKAGE NAME (A-Z) & TIMER PER INSTANCE</span>
       
       <div id="instancesContainer" class="instance-grid">
         <!-- Card instance akan digenerate otomatis lewat JS -->
@@ -146,16 +146,25 @@
       container.innerHTML = "";
 
       for (let i = 1; i <= count; i++) {
+        // Otomatis buat pola cliena, clienb, clienc, dst. berdasarkan urutan angka (1=a, 2=b, 3=c, dst)
+        const charCode = 96 + (i <= 26 ? i : 26);
+        const defaultPkg = `com.roblox.clien${String.fromCharCode(charCode)}`;
+        const savedPkg = localStorage.getItem(`vp_pkg_${i}`) || defaultPkg;
+
         container.innerHTML += `
           <div class="instance-card">
             <div class="instance-title">
-              <span>ROBLOX ${i} (com.roblox.${i})</span>
+              <span>ROBLOX ${i}</span>
               <label class="switch">
                 <input type="checkbox" id="timerEnable${i}" checked onchange="toggleTimerInputs(${i})">
                 <span class="slider"></span>
               </label>
             </div>
-            <div id="timerBox${i}" class="timer-inputs-grid">
+            
+            <label class="sub-label">Package Name (Otomatis a-z):</label>
+            <input type="text" id="pkg${i}" value="${savedPkg}" placeholder="Contoh: com.roblox.cliena" oninput="savePkg(${i})">
+
+            <div id="timerBox${i}" class="timer-inputs-grid" style="margin-top:6px;">
               <div><span class="sub-label">Hari</span><input type="number" id="d${i}" value="0" min="0"></div>
               <div><span class="sub-label">Jam</span><input type="number" id="h${i}" value="1" min="0" max="23"></div>
               <div><span class="sub-label">Menit</span><input type="number" id="m${i}" value="0" min="0" max="59"></div>
@@ -163,6 +172,11 @@
           </div>
         `;
       }
+    }
+
+    function savePkg(id) {
+      const pkgVal = document.getElementById(`pkg${id}`).value.trim();
+      localStorage.setItem(`vp_pkg_${id}`, pkgVal);
     }
 
     function toggleTimerInputs(id) {
@@ -209,7 +223,6 @@
       const webhookUrl = document.getElementById("webhookUrlInput").value.trim();
       if (!webhookUrl) return;
 
-      // Format webhook tanpa kata "CLIENT" sesuai permintaan
       const message = `PERHATIAN!\n\nROBLOX ${instanceNum}\nMENGALAMI FORCE CLOSE \nDAN SUDAH DI PERBAIKI HARAP CEK`;
 
       fetch(webhookUrl, {
@@ -221,47 +234,52 @@
 
     function startMultiInstance() {
       const count = parseInt(document.getElementById("totalInstancesInput").value) || 3;
-      const delay = parseInt(document.getElementById("delayInput").value) || 5;
+      const delay = parseInt(document.getElementById("delayInput").value) || 3;
       const autoRejoin = document.getElementById("autoRejoinToggle").checked;
       const log = document.getElementById("logOutput");
 
       log.innerText = `[+] Memulai ${count} Instance Roblox secara berurutan...\n`;
 
       for (let i = 1; i <= count; i++) {
+        const pkgName = document.getElementById(`pkg${i}`).value.trim();
         const isTimerOn = document.getElementById(`timerEnable${i}`).checked;
+        
+        log.innerText += `[+] Roblox ${i} [${pkgName}] -> `;
         if (isTimerOn) {
           const d = parseInt(document.getElementById(`d${i}`).value) || 0;
           const h = parseInt(document.getElementById(`h${i}`).value) || 0;
           const m = parseInt(document.getElementById(`m${i}`).value) || 0;
-          log.innerText += `[+] Roblox ${i} Timer: ${d}H ${h}J ${m}M\n`;
+          log.innerText += `Timer: ${d}H ${h}J ${m}M\n`;
         } else {
-          log.innerText += `[+] Roblox ${i} Timer Leave: NONAKTIF\n`;
+          log.innerText += `Timer Leave: NONAKTIF\n`;
         }
       }
 
       let step = 1;
       const interval = setInterval(() => {
         if (step <= count) {
-          log.innerText += `[*] Meluncurkan Roblox ${step} (Jeda ${delay}s)...\n`;
+          const pkgName = document.getElementById(`pkg${step}`).value.trim();
+          log.innerText += `[*] Meluncurkan Roblox ${step} (${pkgName})...\n`;
           log.scrollTop = log.scrollHeight;
+          
+          // Intent URI langsung mengarah ke package unik masing-masing tanpa memicu pop-up pilihan
+          window.location.href = `intent://#Intent;package=${pkgName};scheme=roblox;end;`;
+          
           step++;
         } else {
           clearInterval(interval);
-          log.innerText += `[✔] Semua ${count} Instance berhasil dibuka & dipantau!\n`;
+          log.innerText += `[✔] Semua ${count} Instance berhasil diluncurkan & dipantau!\n`;
           log.scrollTop = log.scrollHeight;
           
-          // Simulasi webhook acak sesuai jumlah akun yang aktif
           if (autoRejoin) {
             setTimeout(() => {
               const randomInstance = Math.floor(Math.random() * count) + 1;
-              log.innerText += `[!] Simulasi: Roblox ${randomInstance} Mengalami Force Close & Diperbaiki!\n`;
+              log.innerText += `[!] Roblox ${randomInstance} Mengalami Force Close & Diperbaiki!\n`;
               sendDiscordAlert(randomInstance);
-            }, 5000);
+            }, 6000);
           }
         }
       }, delay * 1000);
-
-      window.location.href = "roblox://";
     }
 
     function logoutKey() {
