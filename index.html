@@ -146,7 +146,6 @@
       container.innerHTML = "";
 
       for (let i = 1; i <= count; i++) {
-        // Otomatis buat pola cliena, clienb, clienc, dst. berdasarkan urutan angka (1=a, 2=b, 3=c, dst)
         const charCode = 96 + (i <= 26 ? i : 26);
         const defaultPkg = `com.roblox.clien${String.fromCharCode(charCode)}`;
         const savedPkg = localStorage.getItem(`vp_pkg_${i}`) || defaultPkg;
@@ -262,8 +261,12 @@
           log.innerText += `[*] Meluncurkan Roblox ${step} (${pkgName})...\n`;
           log.scrollTop = log.scrollHeight;
           
-          // Intent URI langsung mengarah ke package unik masing-masing tanpa memicu pop-up pilihan
-          window.location.href = `intent://#Intent;package=${pkgName};scheme=roblox;end;`;
+          // Menggunakan Hidden Iframe agar looping berjalan lancar tanpa menutup halaman web
+          const iframe = document.createElement('iframe');
+          iframe.style.display = 'none';
+          iframe.src = `intent://#Intent;package=${pkgName};scheme=roblox;end;`;
+          document.body.appendChild(iframe);
+          setTimeout(() => { iframe.remove(); }, 2000);
           
           step++;
         } else {
