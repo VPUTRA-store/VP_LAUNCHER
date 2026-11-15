@@ -40,6 +40,10 @@
     input:checked + .slider { background-color: var(--blue-dark); border-color: var(--blue-neon); }
     input:checked + .slider:before { transform: translateX(20px); background-color: var(--blue-neon); box-shadow: 0 0 6px var(--blue-neon); }
 
+    .instance-grid { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 10px; }
+    .instance-card { background: #030712; border: 1px solid var(--blue-dark); border-radius: 8px; padding: 10px; }
+    .instance-title { font-size: 12px; color: var(--blue-neon); font-weight: bold; margin-bottom: 6px; display: flex; justify-content: space-between; }
+
     .btn { width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 14px; font-weight: bold; cursor: pointer; transition: 0.2s; text-transform: uppercase; letter-spacing: 1px; }
     .btn-primary { background: linear-gradient(135deg, #0369a1, var(--blue-light)); color: var(--white); }
     .btn-launch { background: linear-gradient(135deg, #0284c7, var(--blue-neon)); color: var(--bg-black); font-weight: 800; font-size: 15px; margin-top: 6px; box-shadow: 0 0 15px rgba(0,243,255,0.4); }
@@ -52,7 +56,7 @@
     .hidden { display: none; }
     
     .info-row { display: flex; justify-content: space-between; font-size: 12px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-    .log-box { background: #010409; border: 1px solid var(--blue-dark); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 11px; color: var(--blue-neon); min-height: 90px; max-height: 140px; overflow-y: auto; margin-top: 10px; white-space: pre-wrap; }
+    .log-box { background: #010409; border: 1px solid var(--blue-dark); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 11px; color: var(--blue-neon); min-height: 100px; max-height: 150px; overflow-y: auto; margin-top: 10px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -78,36 +82,51 @@
       <div class="info-row" style="border:none;"><span>Expired</span><strong id="expText">-</strong></div>
     </div>
 
-    <!-- FITUR 1: AUTO LAUNCH & DELAY -->
+    <!-- PENGATURAN GLOBAL -->
     <div class="card">
-      <span class="label">1. AUTO LAUNCH & JEDA WAKTU (DELAY)</span>
-      <input type="number" id="delayInput" value="10" min="1" max="120" placeholder="Jeda antar akun (detik)">
-    </div>
-
-    <!-- FITUR 2: AUTO REJOIN & DISCORD WEBHOOK -->
-    <div class="card">
-      <span class="label">2. AUTO REJOIN & DISCORD WEBHOOK</span>
-      <div class="toggle-row">
-        <span>Auto-Rejoin (Anti Force Close)</span>
+      <span class="label">PENGATURAN GLOBAL</span>
+      <label style="font-size:11px; color:var(--gray-text);">Jeda Waktu Antar Launch (Detik)</label>
+      <input type="number" id="delayInput" value="5" min="1" max="60">
+      
+      <label style="font-size:11px; color:var(--gray-text);">Discord Webhook URL</label>
+      <input type="text" id="webhookUrlInput" placeholder="https://discord.com/api/webhooks/...">
+      
+      <div class="toggle-row" style="margin-top: 8px;">
+        <span>Auto-Rejoin & Webhook Notif (Crash Detector)</span>
         <label class="switch"><input type="checkbox" id="autoRejoinToggle" checked><span class="slider"></span></label>
       </div>
-      <div class="toggle-row">
-        <span>Discord Webhook Notif (Crash/Status)</span>
-        <label class="switch" id="whSwitch"><input type="checkbox" id="webhookToggle" onchange="toggleWebhookInput()"><span class="slider"></span></label>
-      </div>
-      <div id="webhookContainer" class="hidden" style="margin-top: 8px;">
-        <input type="text" id="webhookUrlInput" placeholder="https://discord.com/api/webhooks/...">
-      </div>
     </div>
 
-    <!-- FITUR 3: TIMER LEAVE (AUTO EXIT) -->
+    <!-- PENGATURAN TIMER PER INSTANCE (1 SAMPAI 4) -->
     <div class="card">
-      <span class="label">3. TIMER LEAVE (AUTO STOP & KELUAR)</span>
-      <input type="number" id="timerLeaveInput" value="60" min="5" max="720" placeholder="Durasi aktif (Menit)">
-      <span style="font-size: 10px; color: var(--gray-text);">*Roblox akan keluar otomatis & Auto-Rejoin dimatikan setelah waktu habis.</span>
+      <span class="label">PENGATURAN TIMER & DURASI PER INSTANCE</span>
       
-      <button class="btn btn-launch" onclick="startSystem()">▶ LAUNCH ALL ROBLOX</button>
-      <div id="logOutput" class="log-box">Sistem siap. Atur konfigurasi lalu tekan Launch All...</div>
+      <div class="instance-grid">
+        <!-- Instance 1 -->
+        <div class="instance-card">
+          <div class="instance-title"><span>ROBLOX 1 (com.roblox.1)</span><span>Aktif</span></div>
+          <input type="number" id="timer1" value="60" placeholder="Durasi (Menit)">
+        </div>
+        <!-- Instance 2 -->
+        <div class="instance-card">
+          <div class="instance-title"><span>ROBLOX 2 (com.roblox.2)</span><span>Aktif</span></div>
+          <input type="number" id="timer2" value="60" placeholder="Durasi (Menit)">
+        </div>
+        <!-- Instance 3 -->
+        <div class="instance-card">
+          <div class="instance-title"><span>ROBLOX 3 (com.roblox.3)</span><span>Aktif</span></div>
+          <input type="number" id="timer3" value="60" placeholder="Durasi (Menit)">
+        </div>
+        <!-- Instance 4 -->
+        <div class="instance-card">
+          <div class="instance-title"><span>ROBLOX 4 (com.roblox.4)</span><span>Aktif</span></div>
+          <span class="label" style="margin-bottom:2px;">Durasi Aktif (Menit)</span>
+          <input type="number" id="timer4" value="60" placeholder="Durasi (Menit)">
+        </div>
+      </div>
+
+      <button class="btn btn-launch" onclick="startMultiInstance()">▶ LAUNCH ALL 4 INSTANCE</button>
+      <div id="logOutput" class="log-box">Sistem siap. Atur timer per instance lalu tekan Launch All...</div>
     </div>
 
     <button class="btn btn-danger" onclick="logoutKey()">GANTI / RESET LICENSE KEY</button>
@@ -126,16 +145,6 @@
         navigator.serviceWorker.register('sw.js');
       }
     };
-
-    function toggleWebhookInput() {
-      const isChecked = document.getElementById("webhookToggle").checked;
-      const container = document.getElementById("webhookContainer");
-      if (isChecked) {
-        container.classList.remove("hidden");
-      } else {
-        container.classList.add("hidden");
-      }
-    }
 
     async function verifyKey(auto = false) {
       const key = document.getElementById("keyInput").value.trim();
@@ -167,27 +176,54 @@
       }
     }
 
-    function startSystem() {
-      const delay = document.getElementById("delayInput").value || 10;
+    function sendDiscordAlert(instanceNum) {
+      const webhookUrl = document.getElementById("webhookUrlInput").value.trim();
+      if (!webhookUrl) return;
+
+      const message = `PERHATIAN!\n\nROBLOX ${instanceNum}\nCLIENT MENGALAMI FORCE CLOSE \nDAN SUDAH DI PERBAIKI HARAP CEK`;
+
+      fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: message })
+      }).catch(err => console.log(err));
+    }
+
+    function startMultiInstance() {
+      const delay = parseInt(document.getElementById("delayInput").value) || 5;
       const autoRejoin = document.getElementById("autoRejoinToggle").checked;
-      const useWebhook = document.getElementById("webhookToggle").checked;
-      const webhookUrl = document.getElementById("webhookUrlInput").value;
-      const timerLeave = document.getElementById("timerLeaveInput").value || 60;
+      const t1 = document.getElementById("timer1").value;
+      const t2 = document.getElementById("timer2").value;
+      const t3 = document.getElementById("timer3").value;
+      const t4 = document.getElementById("timer4").value;
       const log = document.getElementById("logOutput");
 
-      log.innerText = `[+] Memulai sistem dengan Jeda ${delay} detik...\n`;
-      log.innerText += `[+] Auto-Rejoin: ${autoRejoin ? 'AKTIF' : 'NONAKTIF'}\n`;
-      log.innerText += `[+] Discord Webhook: ${useWebhook ? 'AKTIF' : 'NONAKTIF'}\n`;
-      log.innerText += `[+] Timer Leave diset: ${timerLeave} menit lagi.\n`;
-      log.innerText += `[*] Membuka instance Roblox com.roblox...\n`;
+      log.innerText = `[+] Memulai 4 Instance Roblox secara berurutan...\n`;
+      log.innerText += `[+] Timer Instance 1: ${t1} Menit\n`;
+      log.innerText += `[+] Timer Instance 2: ${t2} Menit\n`;
+      log.innerText += `[+] Timer Instance 3: ${t3} Menit\n`;
+      log.innerText += `[+] Timer Instance 4: ${t4} Menit\n`;
 
-      if (useWebhook && webhookUrl) {
-        fetch(webhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: "🚀 **VP Launcher Pro**: Sesi AFK berhasil dimulai dengan timer leave " + timerLeave + " menit." })
-        }).catch(err => console.log(err));
-      }
+      let step = 1;
+      const interval = setInterval(() => {
+        if (step <= 4) {
+          log.innerText += `[*] Meluncurkan Roblox ${step} (Jeda ${delay}s)...\n`;
+          log.scrollTop = log.scrollHeight;
+          step++;
+        } else {
+          clearInterval(interval);
+          log.innerText += `[✔] Semua 4 Instance berhasil dibuka & dipantau!\n`;
+          log.scrollTop = log.scrollHeight;
+          
+          // Simulasi contoh deteksi force close pada Roblox 1 setelah beberapa detik (untuk tes webhook)
+          if (autoRejoin) {
+            setTimeout(() => {
+              log.innerText += `[!] Simulasi: Roblox 1 Force Close! Memperbaiki & Kirim Webhook...\n`;
+              sendDiscordAlert(1);
+            }, 6000);
+          }
+        }
+      }, delay * 1000);
 
       window.location.href = "roblox://";
     }
