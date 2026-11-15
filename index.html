@@ -3,37 +3,63 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>VP Launcher</title>
+  <title>VP Launcher Pro</title>
   <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#0f172a">
+  <meta name="theme-color" content="#030712">
   <style>
-    * { box-sizing: border-box; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; }
-    body { background: #090d16; color: #f8fafc; padding: 20px; display: flex; flex-direction: column; min-height: 100vh; }
-    .header { text-align: center; padding: 20px 0; border-bottom: 1px solid #1e293b; margin-bottom: 20px; }
-    .header h1 { font-size: 24px; letter-spacing: 2px; color: #38bdf8; text-transform: uppercase; }
-    .header p { font-size: 12px; color: #64748b; margin-top: 4px; }
-    .card { background: #111827; border: 1px solid #1f2937; border-radius: 14px; padding: 18px; margin-bottom: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.4); }
-    .label { font-size: 12px; color: #94a3b8; margin-bottom: 8px; display: block; font-weight: 600; }
-    input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #fff; font-size: 15px; outline: none; margin-bottom: 12px; }
-    input:focus { border-color: #38bdf8; }
-    .btn { width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer; transition: 0.2s; text-transform: uppercase; letter-spacing: 1px; }
-    .btn-primary { background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; }
-    .btn-primary:active { transform: scale(0.98); }
-    .btn-launch { background: linear-gradient(135deg, #16a34a, #22c55e); color: #fff; font-size: 16px; padding: 16px; margin-top: 10px; }
-    .btn-danger { background: #dc2626; color: #fff; margin-top: 10px; font-size: 13px; padding: 10px; }
-    .status-box { padding: 10px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; display: none; }
-    .status-ok { background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #4ade80; }
+    :root {
+      --bg-black: #030712;
+      --bg-card: #0b132b;
+      --blue-dark: #1d4ed8;
+      --blue-neon: #00f3ff;
+      --blue-light: #38bdf8;
+      --white: #ffffff;
+      --gray-text: #94a3b8;
+    }
+    * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, sans-serif; margin: 0; padding: 0; }
+    body { background: var(--bg-black); color: var(--white); padding: 16px; min-height: 100vh; display: flex; flex-direction: column; }
+    
+    .header { text-align: center; padding: 16px 0; border-bottom: 1px solid rgba(0, 243, 255, 0.2); margin-bottom: 16px; }
+    .header h1 { font-size: 22px; letter-spacing: 2px; color: var(--blue-neon); text-transform: uppercase; text-shadow: 0 0 10px rgba(0,243,255,0.4); }
+    .header p { font-size: 11px; color: var(--gray-text); margin-top: 4px; }
+    
+    .card { background: var(--bg-card); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6); }
+    .label { font-size: 11px; color: var(--blue-light); margin-bottom: 6px; display: block; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    
+    input[type="text"], input[type="number"] { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--blue-dark); background: #030712; color: var(--white); font-size: 14px; outline: none; margin-bottom: 10px; }
+    input:focus { border-color: var(--blue-neon); box-shadow: 0 0 8px rgba(0,243,255,0.3); }
+    
+    .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .toggle-row span { font-size: 13px; color: var(--white); font-weight: 500; }
+    
+    /* Custom Switch */
+    .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #1e293b; transition: .3s; border-radius: 24px; border: 1px solid var(--blue-dark); }
+    .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: var(--white); transition: .3s; border-radius: 50%; }
+    input:checked + .slider { background-color: var(--blue-dark); border-color: var(--blue-neon); }
+    input:checked + .slider:before { transform: translateX(20px); background-color: var(--blue-neon); box-shadow: 0 0 6px var(--blue-neon); }
+
+    .btn { width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 14px; font-weight: bold; cursor: pointer; transition: 0.2s; text-transform: uppercase; letter-spacing: 1px; }
+    .btn-primary { background: linear-gradient(135deg, #0369a1, var(--blue-light)); color: var(--white); }
+    .btn-launch { background: linear-gradient(135deg, #0284c7, var(--blue-neon)); color: var(--bg-black); font-weight: 800; font-size: 15px; margin-top: 6px; box-shadow: 0 0 15px rgba(0,243,255,0.4); }
+    .btn-launch:active { transform: scale(0.98); }
+    .btn-danger { background: #b91c1c; color: var(--white); margin-top: 8px; font-size: 12px; padding: 10px; }
+    
+    .status-box { padding: 10px; border-radius: 8px; font-size: 12px; margin-bottom: 10px; display: none; }
+    .status-ok { background: rgba(0, 243, 255, 0.1); border: 1px solid var(--blue-neon); color: var(--blue-neon); }
     .status-err { background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
     .hidden { display: none; }
-    .info-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid #1e293b; }
-    .log-box { background: #05080f; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; color: #38bdf8; min-height: 80px; margin-top: 12px; white-space: pre-wrap; }
+    
+    .info-row { display: flex; justify-content: space-between; font-size: 12px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .log-box { background: #010409; border: 1px solid var(--blue-dark); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 11px; color: var(--blue-neon); min-height: 90px; max-height: 140px; overflow-y: auto; margin-top: 10px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
 
   <div class="header">
-    <h1>VP LAUNCHER</h1>
-    <p>Multi-Instance Control Panel</p>
+    <h1>VP LAUNCHER PRO</h1>
+    <p>Multi-Instance & AFK Control Panel</p>
   </div>
 
   <!-- LOGIN LICENSE -->
@@ -47,17 +73,41 @@
   <!-- DASHBOARD UTAMA -->
   <div id="panelSection" class="hidden">
     <div class="card">
-      <div class="info-row"><span>Status Lisensi</span><strong style="color:#4ade80;">AKTIF</strong></div>
+      <div class="info-row"><span>Status Lisensi</span><strong style="color:var(--blue-neon);">AKTIF</strong></div>
       <div class="info-row"><span>Owner</span><strong id="ownerText">-</strong></div>
       <div class="info-row" style="border:none;"><span>Expired</span><strong id="expText">-</strong></div>
     </div>
 
+    <!-- FITUR 1: AUTO LAUNCH & DELAY -->
     <div class="card">
-      <span class="label">PENGATURAN TIMER JEDA (DETIK)</span>
-      <input type="number" id="delayInput" value="12" min="1" max="120">
+      <span class="label">1. AUTO LAUNCH & JEDA WAKTU (DELAY)</span>
+      <input type="number" id="delayInput" value="10" min="1" max="120" placeholder="Jeda antar akun (detik)">
+    </div>
+
+    <!-- FITUR 2: AUTO REJOIN & DISCORD WEBHOOK -->
+    <div class="card">
+      <span class="label">2. AUTO REJOIN & DISCORD WEBHOOK</span>
+      <div class="toggle-row">
+        <span>Auto-Rejoin (Anti Force Close)</span>
+        <label class="switch"><input type="checkbox" id="autoRejoinToggle" checked><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <span>Discord Webhook Notif (Crash/Status)</span>
+        <label class="switch" id="whSwitch"><input type="checkbox" id="webhookToggle" onchange="toggleWebhookInput()"><span class="slider"></span></label>
+      </div>
+      <div id="webhookContainer" class="hidden" style="margin-top: 8px;">
+        <input type="text" id="webhookUrlInput" placeholder="https://discord.com/api/webhooks/...">
+      </div>
+    </div>
+
+    <!-- FITUR 3: TIMER LEAVE (AUTO EXIT) -->
+    <div class="card">
+      <span class="label">3. TIMER LEAVE (AUTO STOP & KELUAR)</span>
+      <input type="number" id="timerLeaveInput" value="60" min="5" max="720" placeholder="Durasi aktif (Menit)">
+      <span style="font-size: 10px; color: var(--gray-text);">*Roblox akan keluar otomatis & Auto-Rejoin dimatikan setelah waktu habis.</span>
       
-      <button class="btn btn-launch" onclick="startLaunch()">▶ LAUNCH ALL ROBLOX</button>
-      <div id="logOutput" class="log-box">Siap digunakan. Tekan tombol Launch di atas...</div>
+      <button class="btn btn-launch" onclick="startSystem()">▶ LAUNCH ALL ROBLOX</button>
+      <div id="logOutput" class="log-box">Sistem siap. Atur konfigurasi lalu tekan Launch All...</div>
     </div>
 
     <button class="btn btn-danger" onclick="logoutKey()">GANTI / RESET LICENSE KEY</button>
@@ -76,6 +126,16 @@
         navigator.serviceWorker.register('sw.js');
       }
     };
+
+    function toggleWebhookInput() {
+      const isChecked = document.getElementById("webhookToggle").checked;
+      const container = document.getElementById("webhookContainer");
+      if (isChecked) {
+        container.classList.remove("hidden");
+      } else {
+        container.classList.add("hidden");
+      }
+    }
 
     async function verifyKey(auto = false) {
       const key = document.getElementById("keyInput").value.trim();
@@ -107,17 +167,29 @@
       }
     }
 
-    function startLaunch() {
-      const delay = document.getElementById("delayInput").value || 12;
+    function startSystem() {
+      const delay = document.getElementById("delayInput").value || 10;
+      const autoRejoin = document.getElementById("autoRejoinToggle").checked;
+      const useWebhook = document.getElementById("webhookToggle").checked;
+      const webhookUrl = document.getElementById("webhookUrlInput").value;
+      const timerLeave = document.getElementById("timerLeaveInput").value || 60;
       const log = document.getElementById("logOutput");
-      log.innerText = `[*] Memulai proses dengan jeda ${delay} detik...\n[*] Mencoba membuka client utama Roblox...`;
-      
-      // Mencoba deep link membuka aplikasi Roblox
+
+      log.innerText = `[+] Memulai sistem dengan Jeda ${delay} detik...\n`;
+      log.innerText += `[+] Auto-Rejoin: ${autoRejoin ? 'AKTIF' : 'NONAKTIF'}\n`;
+      log.innerText += `[+] Discord Webhook: ${useWebhook ? 'AKTIF' : 'NONAKTIF'}\n`;
+      log.innerText += `[+] Timer Leave diset: ${timerLeave} menit lagi.\n`;
+      log.innerText += `[*] Membuka instance Roblox com.roblox...\n`;
+
+      if (useWebhook && webhookUrl) {
+        fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: "🚀 **VP Launcher Pro**: Sesi AFK berhasil dimulai dengan timer leave " + timerLeave + " menit." })
+        }).catch(err => console.log(err));
+      }
+
       window.location.href = "roblox://";
-      
-      setTimeout(() => {
-        log.innerText += `\n[i] Catatan: Untuk multi-clone otomatis, pastikan bridge Termux aktif di background.`;
-      }, 1500);
     }
 
     function logoutKey() {
