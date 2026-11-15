@@ -16,6 +16,8 @@ PAKET=()       # daftar aplikasi Roblox yang terdeteksi
 declare -A TIMER_MENIT   # timer per aplikasi (menit). 0 = tanpa timer
 declare -A MULAI         # kapan aplikasi terakhir diluncurkan
 declare -A SELESAI       # 1 = timernya sudah habis, jangan di-rejoin
+declare -A TIMER_JADWAL  # jadwal off (waktu pasti, epoch). 0 = tidak ada
+declare -A TMULAI        # kapan timer durasi mulai dihitung (tidak ikut ter-reset saat rejoin)
 
 # Perintah root. Redfinger harus sudah di-root untuk force-stop & cek proses.
 if command -v su >/dev/null 2>&1; then
@@ -174,6 +176,11 @@ launch_semua() {
     i=$((i + 1))
     echo "[$i/${#PAKET[@]}] Membuka $p"
     SELESAI[$p]=0
+    TMULAI[$p]=$(date +%s)
+    if [ "${TIMER_JADWAL[$p]:-0}" -gt 0 ] && [ "${TIMER_JADWAL[$p]}" -le "$(date +%s)" ]; then
+      echo "   jadwal off sudah lewat, dilewati"
+      TIMER_JADWAL[$p]=0
+    fi
     buka "$p"
     if [ $i -lt ${#PAKET[@]} ]; then jeda; fi
   done
@@ -182,10 +189,23 @@ launch_semua() {
   return 0
 }
 
+punya_timer() {
+  [ "${TIMER_MENIT[$1]:-0}" -gt 0 ] || [ "${TIMER_JADWAL[$1]:-0}" -gt 0 ]
+}
+
 ada_timer() {
   for p in "${PAKET[@]}"; do
-    if [ "${TIMER_MENIT[$p]:-0}" -gt 0 ]; then return 0; fi
+    if punya_timer "$p"; then return 0; fi
   done
+  return 1
+}
+
+# apakah timer paket $1 sudah habis pada waktu $2 (epoch)?
+timer_habis() {
+  local p="$1" now="$2"
+  local j="${TIMER_JADWAL[$p]:-0}" t="${TIMER_MENIT[$p]:-0}"
+  if [ "$j" -gt 0 ] && [ "$now" -ge "$j" ]; then return 0; fi
+  if [ "$t" -gt 0 ] && [ $((now - ${TMULAI[$p]:-$now})) -ge $((t * 60)) ]; then return 0; fi
   return 1
 }
 
@@ -204,11 +224,11 @@ pantau() {
       [ "${SELESAI[$p]:-0}" = "1" ] && continue
 
       # --- cek timer ---
-      local t="${TIMER_MENIT[$p]:-0}"
-      if [ "$t" -gt 0 ] && [ $((now - ${MULAI[$p]:-$now})) -ge $((t * 60)) ]; then
+      if timer_habis "$p" "$now"; then
         tulis "[$(date +%T)] Timer habis: $p -> ditutup"
         rt "am force-stop $p" >/dev/null 2>&1
         SELESAI[$p]=1
+        TIMER_JADWAL[$p]=0
         kirim_webhook "Timer habis, $p ditutup."
         continue
       fi
@@ -229,7 +249,7 @@ pantau() {
     if [ "$rejoin" = "0" ]; then
       local sisa=0
       for p in "${PAKET[@]}"; do
-        if [ "${TIMER_MENIT[$p]:-0}" -gt 0 ] && [ "${SELESAI[$p]:-0}" != "1" ]; then
+        if punya_timer "$p" && [ "${SELESAI[$p]:-0}" != "1" ]; then
           sisa=1
         fi
       done
@@ -266,6 +286,129 @@ tanya_map() {
   return 0
 }
 
+# ---------- Timer ----------
+format_durasi() {
+  local m="$1" h j s out=""
+  h=$((m / 1440)); j=$(((m % 1440) / 60)); s=$((m % 60))
+  if [ "$h" -gt 0 ]; then out="$h hari "; fi
+  if [ "$j" -gt 0 ]; then out="$out$j jam "; fi
+  if [ "$s" -gt 0 ]; then out="$out$s menit"; fi
+  echo "${out% }"
+}
+
+ket_timer() {
+  local p="$1"
+  if [ "${TIMER_JADWAL[$p]:-0}" -gt 0 ]; then
+    echo "off $(date -d "@${TIMER_JADWAL[$p]}" '+%d/%m %H:%M')"
+  elif [ "${TIMER_MENIT[$p]:-0}" -gt 0 ]; then
+    echo "durasi $(format_durasi "${TIMER_MENIT[$p]}")"
+  else
+    echo "tanpa timer"
+  fi
+}
+
+# cari waktu terdekat (di masa depan) untuk tanggal & jam yang dipilih
+hitung_jadwal() {
+  local tgl=$((10#$1)) jam=$((10#$2)) mnt=$((10#$3)) i ym e now
+  now=$(date +%s)
+  for i in 0 1 2 3 4 5 6 7 8 9 10 11 12; do
+    ym=$(date -d "$(date +%Y-%m-01) +$i month" +%Y-%m 2>/dev/null) || continue
+    e=$(date -d "$ym-$(printf '%02d' "$tgl") $(printf '%02d' "$jam"):$(printf '%02d' "$mnt"):00" +%s 2>/dev/null) || continue
+    if [ "$e" -gt "$now" ]; then
+      echo "$e"
+      return 0
+    fi
+  done
+  return 1
+}
+
+baca_angka() {   # hasil di $ANGKA, kosong dianggap 0
+  local x
+  while true; do
+    read -r -p "$1" x
+    [ -z "$x" ] && x=0
+    if [[ "$x" =~ ^[0-9]+$ ]]; then
+      ANGKA=$((10#$x))
+      return
+    fi
+    echo "  harus angka"
+  done
+}
+
+timer_durasi() {
+  local p="$1" h j m total
+  echo
+  tulis "Isi angka, kosong = 0. Timer mulai dihitung saat Roblox diluncurkan."
+  baca_angka "Hari  : "; h=$ANGKA
+  baca_angka "Jam   : "; j=$ANGKA
+  baca_angka "Menit : "; m=$ANGKA
+  total=$((h * 1440 + j * 60 + m))
+  if [ "$total" -le 0 ]; then
+    TIMER_MENIT[$p]=0
+    echo "Durasi 0, timer dihapus."
+  else
+    TIMER_MENIT[$p]=$total
+    TIMER_JADWAL[$p]=0
+    echo "Timer: $(format_durasi "$total")"
+  fi
+  sleep 2
+}
+
+timer_jadwal() {
+  local p="$1" tgl jm jam mnt e
+  echo
+  tulis "Roblox ditutup pada tanggal & jam yang dipilih (format 24 jam, ikut jam Redfinger)."
+  read -r -p "Tanggal (1-31): " tgl
+  if ! [[ "$tgl" =~ ^[0-9]+$ ]] || [ "$((10#$tgl))" -lt 1 ] || [ "$((10#$tgl))" -gt 31 ]; then
+    echo "Tanggal tidak valid."
+    sleep 2
+    return
+  fi
+  read -r -p "Jam:menit (contoh 00:10): " jm
+  if ! [[ "$jm" =~ ^([01]?[0-9]|2[0-3]):([0-5][0-9])$ ]]; then
+    echo "Format jam salah."
+    sleep 2
+    return
+  fi
+  jam="${BASH_REMATCH[1]}"
+  mnt="${BASH_REMATCH[2]}"
+  e=$(hitung_jadwal "$tgl" "$jam" "$mnt")
+  if [ -z "$e" ]; then
+    echo "Tanggal tidak ditemukan."
+    sleep 2
+    return
+  fi
+  TIMER_JADWAL[$p]=$e
+  TIMER_MENIT[$p]=0
+  echo "Roblox akan ditutup:"
+  echo "$(date -d "@$e" '+%d/%m/%Y %H:%M')"
+  sleep 2
+}
+
+atur_timer_satu() {
+  local p="$1" pil
+  header
+  echo "$p"
+  echo "Timer: $(ket_timer "$p")"
+  echo
+  echo "1. Durasi (hari/jam/menit)"
+  echo "2. Jadwal (tanggal & jam)"
+  echo "3. Hapus timer"
+  echo "0. Kembali"
+  echo
+  read -r -p "Pilih: " pil
+  case "$pil" in
+    1) timer_durasi "$p" ;;
+    2) timer_jadwal "$p" ;;
+    3)
+      TIMER_MENIT[$p]=0
+      TIMER_JADWAL[$p]=0
+      echo "Timer dihapus."
+      sleep 1
+      ;;
+  esac
+}
+
 menu_timer() {
   header
   cari_roblox
@@ -275,22 +418,63 @@ menu_timer() {
     return
   fi
 
-  tulis "TIMER (1 timer untuk 1 Roblox)"
-  tulis "Isi menit. Isi 0 untuk tanpa timer. Enter = tidak diubah."
-  echo
-  for p in "${PAKET[@]}"; do
-    echo "$p"
-    read -r -p "  menit [${TIMER_MENIT[$p]:-0}]: " m
-    [ -z "$m" ] && continue
-    if [[ "$m" =~ ^[0-9]+$ ]]; then
-      TIMER_MENIT[$p]=$m
-    else
-      echo "  bukan angka, dilewati"
-    fi
+  local pil i p nowt
+  while true; do
+    header
+    echo "TIMER (1 timer untuk 1 Roblox)"
+    echo "Jam Redfinger: $(date '+%d/%m %H:%M')"
+    echo
+    i=0
+    for p in "${PAKET[@]}"; do
+      i=$((i + 1))
+      echo "$i. $p"
+      echo "   $(ket_timer "$p")"
+    done
+    echo
+    echo "H. Hapus semua timer"
+    echo "M. Mulai pantau timer"
+    echo "0. Kembali"
+    echo
+    read -r -p "Pilih: " pil
+
+    case "$pil" in
+      0) return ;;
+      [Hh])
+        for p in "${PAKET[@]}"; do
+          TIMER_MENIT[$p]=0
+          TIMER_JADWAL[$p]=0
+        done
+        echo "Semua timer dihapus."
+        sleep 1
+        ;;
+      [Mm])
+        if ! ada_timer; then
+          echo "Belum ada timer."
+          sleep 2
+        else
+          nowt=$(date +%s)
+          for p in "${PAKET[@]}"; do
+            SELESAI[$p]=0
+            TMULAI[$p]=$nowt
+            if [ "${TIMER_JADWAL[$p]:-0}" -gt 0 ] && [ "${TIMER_JADWAL[$p]}" -le "$nowt" ]; then
+              TIMER_JADWAL[$p]=0
+            fi
+          done
+          tulis "Memantau timer tanpa membuka ulang Roblox."
+          pantau 0
+          tunggu_enter
+        fi
+        ;;
+      *)
+        if [[ "$pil" =~ ^[0-9]+$ ]] && [ "$pil" -ge 1 ] && [ "$pil" -le ${#PAKET[@]} ]; then
+          atur_timer_satu "${PAKET[$((pil - 1))]}"
+        else
+          echo "Pilihan tidak ada."
+          sleep 1
+        fi
+        ;;
+    esac
   done
-  echo
-  tulis "Timer tersimpan. Timer mulai dihitung saat Roblox diluncurkan (menu 1 atau 2)."
-  tunggu_enter
 }
 
 menu_delay() {
