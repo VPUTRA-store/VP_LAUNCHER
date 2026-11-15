@@ -1,185 +1,69 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-import os
-import sys
 import time
-import random
+import os
+import requests
 import subprocess
 
-try:
-    import requests
-except ImportError:
-    os.system("pip install requests -q")
-    import requests
+PACKAGE_NAME = "com.roblox"
+DELAY_BETWEEN_LAUNCH = 5
+AUTO_REJOIN_ENABLED = True
+WEBHOOK_ENABLED = True
+WEBHOOK_URL = "URL_DISCORD_WEBHOOK_KAMU"
+TIMER_LEAVE_MENIT = 60
 
-GITHUB_USER = "VPUTRA-store"
-REPO_NAME = "VP_LAUNCHER"
-LICENSE_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/main/licenses.json"
-KEY_FILE = os.path.expanduser("~/.vp_license_key")
-
-def clear_screen():
-    os.system('clear' if os.name == 'posix' else 'cls')
-
-def verify_license():
-    saved_key = ""
-    if os.path.exists(KEY_FILE):
-        with open(KEY_FILE, "r") as f:
-            saved_key = f.read().strip()
-
-    if not saved_key:
-        print("\n[!] Lisensi belum terdaftar di perangkat ini.")
-        saved_key = input("    Masukkan License Key > ").strip()
-
-    if not saved_key:
-        print("\n[X] License Key tidak boleh kosong!")
-        return False
-
-    print("\n[*] Memverifikasi lisensi ke server...")
-    try:
-        resp = requests.get(f"{LICENSE_URL}?t={int(time.time())}", timeout=10)
-        if resp.status_code != 200:
-            print("[X] Gagal terhubung ke server lisensi.")
-            return False
-
-        licenses = resp.json()
-        if saved_key in licenses and licenses[saved_key].get("status") == "active":
-            with open(KEY_FILE, "w") as f:
-                f.write(saved_key)
-            owner = licenses[saved_key].get("owner", "Member")
-            print(f"[OK] Lisensi Valid! Selamat datang, {owner}.")
-            time.sleep(1.5)
-            return True
-        else:
-            if os.path.exists(KEY_FILE):
-                os.remove(KEY_FILE)
-            print("[X] License Key tidak valid atau sudah nonaktif!")
-            return False
-    except Exception as e:
-        print(f"[X] Kesalahan jaringan: {e}")
-        return False
-
-def scan_roblox_packages():
-    packages = []
-    try:
-        stream = os.popen("su -c 'pm list packages'")
-        output = stream.read()
-        stream.close()
-        for line in output.splitlines():
-            clean = line.strip().lower()
-            if "com.roblox" in clean or "roblox" in clean:
-                pkg = clean.replace("package:", "").strip()
-                if pkg and pkg not in packages:
-                    packages.append(pkg)
-    except Exception:
-        pass
-
-    if not packages:
-        try:
-            stream = os.popen("su pm list packages")
-            output = stream.read()
-            stream.close()
-            for line in output.splitlines():
-                clean = line.strip().lower()
-                if "com.roblox" in clean or "roblox" in clean:
-                    pkg = clean.replace("package:", "").strip()
-                    if pkg and pkg not in packages:
-                        packages.append(pkg)
-        except Exception:
-            pass
-
-    return sorted(packages)
-
-def launch_all_packages(delay_time=12):
-    clear_screen()
-    print("=" * 45)
-    print("         MEMINDAI & MELUNCURKAN GAME         ")
-    print("=" * 45)
-    packages = scan_roblox_packages()
-
-    if not packages:
-        print("\n[!] Tidak ada package com.roblox terdeteksi!")
-        print("[!] Pastikan Roblox sudah terinstal & root aktif.")
-        input("\nTekan Enter untuk kembali...")
+def send_discord_webhook(message):
+    if not WEBHOOK_ENABLED or not WEBHOOK_URL or WEBHOOK_URL == "URL_DISCORD_WEBHOOK_KAMU":
         return
+    try:
+        payload = {"content": f"🤖 **[VP Launcher Bot]**\n{message}"}
+        requests.post(WEBHOOK_URL, json=payload, timeout=5)
+    except Exception as e:
+        print(f"[!] Gagal mengirim webhook: {e}")
 
-    print(f"[+] Ditemukan {len(packages)} client Roblox.")
-    print(f"[i] Jeda antar client: {delay_time} detik.")
-    print("=" * 45)
-    
-    for idx, pkg in enumerate(packages, start=1):
-        print(f"[{idx}/{len(packages)}] Membuka: {pkg}")
-        cmd = f"su -c 'monkey -p {pkg} -c android.intent.category.LAUNCHER 1'"
-        os.system(cmd)
+def is_roblox_running():
+    try:
+        result = subprocess.run(["pidof", PACKAGE_NAME], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return len(result.stdout.strip()) > 0
+    except:
+        return False
 
-        if idx < len(packages):
-            print(f"    └─ Menunggu {delay_time} detik...")
-            time.sleep(delay_time)
+def launch_roblox():
+    print(f"[*] Membuka aplikasi {PACKAGE_NAME}...")
+    os.system(f"monkey -p {PACKAGE_NAME} -c android.intent.category.LAUNCHER 1")
 
-    print("-" * 45)
-    print("[OK] Selesai! Semua client berhasil diluncurkan.")
-    print("=" * 45)
-    input("\nTekan Enter untuk kembali ke menu...")
-
-def reset_license():
-    if os.path.exists(KEY_FILE):
-        os.remove(KEY_FILE)
-        print("\n[✔] Lisensi berhasil di-reset dari perangkat ini.")
-    else:
-        print("\n[!] Belum ada lisensi tersimpan.")
-    input("\nTekan Enter untuk kembali...")
+def force_stop_roblox():
+    print(f"[*] Menghentikan paksa {PACKAGE_NAME}...")
+    os.system(f"am force-stop {PACKAGE_NAME}")
 
 def main():
-    clear_screen()
-    if not verify_license():
-        sys.exit(1)
-
-    delay_sec = 12  # Default jeda timer aman
-
-    while True:
-        clear_screen()
-        print("=" * 45)
-        print("            VP LAUNCHER - PANEL              ")
-        print("=" * 45)
-        print(" [1] LAUNCH ALL ROBLOX (AUTO)")
-        print(f" [2] ATUR TIMER JEDA ({delay_sec} Detik)")
-        print(" [3] GANTI / RESET LICENSE KEY")
-        print(" [4] KELUAR")
-        print("=" * 45)
-        
-        choice = input("Pilih menu [1-4] > ").strip()
-        
-        if choice == '1':
-            launch_all_packages(delay_sec)
-        elif choice == '2':
-            clear_screen()
-            print("=" * 45)
-            print("            PENGATURAN TIMER                 ")
-            print("=" * 45)
-            try:
-                val = input("Masukkan waktu jeda dalam detik (Misal: 10 atau 15) > ").strip()
-                if val.isdigit() and int(val) > 0:
-                    delay_sec = int(val)
-                    print(f"\n[✔] Timer jeda berhasil diubah jadi {delay_sec} detik!")
-                else:
-                    print("\n[!] Masukkan angka yang valid.")
-            except Exception:
-                print("\n[!] Terjadi kesalahan input.")
-            input("\nTekan Enter untuk kembali...")
-        elif choice == '3':
-            reset_license()
-        elif choice == '4':
-            clear_screen()
-            print("Keluar dari VP Launcher. Sampai jumpa!")
-            break
-        else:
-            print("\n[!] Pilihan tidak valid.")
-            input("Tekan Enter...")
+    print("=" * 50)
+    print("       VP LAUNCHER - AUTOMATION ENGINE       ")
+    print("=" * 50)
+    
+    send_discord_webhook("🚀 **Sistem AFK Dimulai!** Launcher aktif.")
+    launch_roblox()
+    time.sleep(DELAY_BETWEEN_LAUNCH)
+    
+    end_time = time.time() + (TIMER_LEAVE_MENIT * 60)
+    
+    try:
+        while True:
+            if time.time() >= end_time:
+                print("\n[!] Timer Leave habis! Menutup game...")
+                force_stop_roblox()
+                send_discord_webhook("⏰ **Timer Leave Tercapai:** Game ditutup otomatis.")
+                break
+            
+            if AUTO_REJOIN_ENABLED and not is_roblox_running():
+                print("\n[!] Roblox Terdeteksi Crash / Force Close!")
+                send_discord_webhook("⚠️ **Peringatan Crash:** Roblox tertutup, melakukan Auto-Rejoin...")
+                time.sleep(3)
+                launch_roblox()
+                time.sleep(5)
+            
+            time.sleep(10)
+    except KeyboardInterrupt:
+        print("\n[!] Dihentikan manual.")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n[!] Dihentikan.")
-        sys.exit(0)
-        
+    main()
+    
