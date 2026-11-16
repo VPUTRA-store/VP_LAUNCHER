@@ -1,52 +1,32 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # =====================================================
-#  VP LAUNCHER - sisi buyer
+#  VP LAUNCHER - sisi buyer (versi ringkas)
 #  Jalan di Termux. Butuh: curl (pkg install curl -y)
 # =====================================================
 
 # ---------- PENGATURAN (diisi admin) ----------
-# Ganti USERNAME_GITHUB dengan username GitHub kamu.
 KEY_URL="https://raw.githubusercontent.com/VPUTRA-store/VP_LAUNCHER/main/keys.txt"
 # ----------------------------------------------
 
-WEBHOOK=""     # webhook Discord buyer (opsional)
-PLACE_URL=""   # link map untuk fitur re join
-DELAY_DETIK=10 # jeda antar Roblox saat dibuka (bisa diatur buyer di menu)
-PAKET=()       # daftar aplikasi Roblox yang terdeteksi
-declare -A TIMER_MENIT   # timer per aplikasi (menit). 0 = tanpa timer
+WEBHOOK=""       # webhook Discord buyer (opsional)
+PLACE_URL=""     # link map tetap (opsional). Kosong = pakai map terakhir yang dimainkan
+DELAY_DETIK=10   # jeda antar Roblox saat dibuka
+GAP_DETIK="0.5"  # jeda keluar -> masuk lagi saat jadwal (0.3 - 1)
+PAKET=()         # daftar aplikasi Roblox yang terdeteksi
 declare -A MULAI         # kapan aplikasi terakhir diluncurkan
-declare -A SELESAI       # 1 = timernya sudah habis, jangan di-rejoin
-declare -A TIMER_JADWAL  # jadwal off (waktu pasti, epoch). 0 = tidak ada
-declare -A TMULAI        # kapan timer durasi mulai dihitung (tidak ikut ter-reset saat rejoin)
+declare -A JADWAL_TIPE   # "" = tidak ada, interval, harian
+declare -A JADWAL_NILAI  # interval: menit | harian: "06:00,12:00"
+declare -A NEXT_RESTART  # waktu (epoch) keluar-masuk berikutnya
+declare -A LAST_MAP      # map terakhir yang terdeteksi: roblox://placeId=...
+STOP=0
 
-# --- Anti AFK (auto klik) ---
-AFK_AKTIF=0    # 1 = aktif
-AFK_DETIK=30   # interval klik (3-50 detik)
-AFK_MODE=1     # 1 = ketuk tengah jendela, 2 = geser kecil
-declare -A NEXT_KLIK     # kapan klik berikutnya untuk tiap Roblox
-
-# --- Auto posisi jendela ---
-POSISI_AKTIF=0 # 1 = jendela ditata otomatis saat auto launch
-AREA_PERSEN=100 # tinggi area penataan (persen tinggi layar)
-declare -A POS_JENDELA   # posisi tujuan tiap Roblox: "kiri atas kanan bawah"
-declare -A BOUNDS_CACHE  # posisi jendela terbaca: "kiri atas kanan bawah"
-BOUNDS_WAKTU=0
-
-# --- Cara keluar map saat timer habis ---
-MODE_KELUAR=1  # 1 = pintasan keyboard, 2 = pindah ke map lain, 3 = tutup aplikasi
-MAP_TUJUAN=""  # dipakai kalau MODE_KELUAR=2
-MAP_HASIL=""
-STOP=0         # diisi 1 saat CTRL+C ditekan
-
-# Perintah root. Redfinger harus sudah di-root untuk force-stop & cek proses.
+# Perintah root. Redfinger harus sudah di-root.
 if command -v su >/dev/null 2>&1; then
   SU="su -c"
 else
   SU="sh -c"
 fi
 
-# su bisa mengacaukan pengaturan layar Termux (Enter tidak berfungsi,
-# tulisan miring ke kanan). Dua fungsi ini mencegah dan memperbaikinya.
 fix_tty() { stty sane 2>/dev/null; }
 rt() {
   $SU "$1" </dev/null
@@ -58,7 +38,7 @@ rt() {
 # CTRL+C hanya menghentikan pemantauan dan kembali ke menu.
 trap 'STOP=1' INT
 
-# ---------- Tampilan (menyesuaikan lebar layar / DPI) ----------
+# ---------- Tampilan ----------
 lebar() {
   local c
   c=$({ stty size </dev/tty; } 2>/dev/null | cut -d' ' -f2)
@@ -68,7 +48,6 @@ lebar() {
   echo "$c"
 }
 
-# garis pemisah: panjangnya mengikuti lebar layar (maksimal 30)
 garis() {
   local w
   w=$(lebar)
@@ -76,7 +55,6 @@ garis() {
   printf '%*s\n' "$((w - 1))" '' | tr ' ' '-'
 }
 
-# tulisan panjang otomatis dipotong rapi sesuai lebar layar
 tulis() {
   printf '%s\n' "$1" | fold -s -w "$(( $(lebar) - 1 ))"
 }
@@ -160,7 +138,9 @@ info_webhook() {
 
 # pesan: Roblox force close lalu di-rejoin
 pesan_fc() {
-  local p="$1" msg
+  local p="$1" map msg
+  map="map terakhir"
+  [ -z "$(map_untuk "$p")" ] && map="hanya membuka aplikasi (map belum terdeteksi)"
   IFS= read -r -d '' msg <<EOF
 ⚠️ ───────────────────────── ⚠️
        🚨 PERINGATAN 🚨
@@ -171,35 +151,29 @@ Akun Roblox kamu mengalami FORCE CLOSE (FC) secara tiba-tiba!
 📱 Roblox: \`$p\`
 🕐 Waktu: $(date '+%d/%m/%Y %H:%M:%S')
 
-🔄 Sistem sedang memproses perbaikan otomatis & melakukan RE-JOIN ulang ke dalam map.
-
-📌 Status: Harap cek perangkat segera!
+🔄 Sistem membuka Roblox lagi ($map).
 
 ───────────────────────────────
-🤖 Powered by VP LAUNCHER 
+🤖 Powered by VP LAUNCHER
 EOF
   kirim_webhook "$msg"
 }
 
-# pesan: timer / sesi waktu habis
-pesan_timer() {
+# pesan: keluar-masuk sesuai jadwal
+pesan_jadwal() {
   local p="$1" msg
   IFS= read -r -d '' msg <<EOF
-⏳ ───────────────────────── ⏳
-       ⏰ SESI WAKTU HABIS ⏰
+🔁 ───────────────────────── 🔁
+     ⏰ KELUAR-MASUK TERJADWAL ⏰
 ───────────────────────────────
-
-Batas waktu sesi AFK untuk akun Roblox kamu telah SELESAI!
 
 📱 Roblox: \`$p\`
 🕐 Waktu: $(date '+%d/%m/%Y %H:%M:%S')
 
-🚪 Akun telah otomatis keluar dari map / sesi dihentikan sesuai timer.
-
-📌 Status: Silakan cek & atur ulang jika diperlukan.
+Akun sudah keluar dari Roblox dan masuk lagi sesuai jadwal.
 
 ───────────────────────────────
-🤖 Powered by VP LAUNCHER 
+🤖 Powered by VP LAUNCHER
 EOF
   kirim_webhook "$msg"
 }
@@ -219,11 +193,30 @@ sedang_jalan() {
   [ -n "$hasil" ]
 }
 
-buka() {
-  local p="$1"
+# map yang dipakai untuk masuk lagi: link tetap kalau ada, kalau tidak map terakhir
+map_untuk() {
   if [ -n "$PLACE_URL" ]; then
-    rt "am start -a android.intent.action.VIEW -d '$PLACE_URL' -p $p" >/dev/null 2>&1
+    echo "$PLACE_URL"
   else
+    echo "${LAST_MAP[$1]:-}"
+  fi
+}
+
+# susun perintah membuka Roblox (dengan / tanpa map)
+perintah_buka() {
+  local p="$1" url="$2"
+  if [ -n "$url" ]; then
+    echo "am start -a android.intent.action.VIEW -d '$url' -p $p"
+  else
+    echo "am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p $p"
+  fi
+}
+
+buka() {
+  local p="$1" url out
+  url=$(map_untuk "$p")
+  out=$(rt "$(perintah_buka "$p" "$url")" 2>&1)
+  if [ -z "$url" ] && printf '%s' "$out" | grep -qi 'error'; then
     rt "monkey -p $p -c android.intent.category.LAUNCHER 1" >/dev/null 2>&1
   fi
   MULAI[$p]=$(date +%s)
@@ -234,191 +227,55 @@ jeda() {
   sleep "$DELAY_DETIK"
 }
 
-# ---------- Info layar & jendela ----------
-# ukuran layar saat ini (sudah memperhitungkan rotasi): "lebar tinggi"
-ukuran_layar() {
-  local u
-  u=$(rt "dumpsys window displays" 2>/dev/null | tr -d '\r' | grep -oE 'cur=[0-9]+x[0-9]+' | head -n1 | cut -d= -f2)
-  if ! [[ "$u" =~ ^[0-9]+x[0-9]+$ ]]; then
-    u=$(rt "wm size" 2>/dev/null | tr -d '\r' | grep -oE '[0-9]+x[0-9]+' | tail -n1)
-  fi
-  echo "${u/x/ }"
-}
+# ---------- Deteksi map terakhir ----------
+# Dibaca dari log Roblox yang sedang jalan (dan dari intent aktivitas).
+# Hasil disimpan di LAST_MAP supaya bisa dipakai setelah Roblox mati.
+deteksi_map() {
+  local p="$1" pid dat place kode lg dplace
+  pid=$(rt "pidof $p" 2>/dev/null | tr -d '\r' | awk '{print $1}')
+  [ -z "$pid" ] && return 1
 
-# baca posisi semua jendela Roblox sekaligus -> BOUNDS_CACHE
-ambil_bounds() {
-  local p l t r b
-  while read -r p l t r b; do
-    if [ -n "$p" ] && [ -n "$b" ]; then BOUNDS_CACHE[$p]="$l $t $r $b"; fi
-  done < <(rt "dumpsys window windows" 2>/dev/null | tr -d '\r' | awk '
-    /Window #[0-9]+ Window\{/ {
-      cur = ""
-      if (match($0, /u[0-9]+ com\.roblox[A-Za-z0-9_.]*\//)) {
-        cur = substr($0, RSTART, RLENGTH - 1)
-        sub(/^u[0-9]+ /, "", cur)
-        if (cur in seen) cur = ""
-      }
-    }
-    cur != "" && match($0, /(mFrame|frame)=\[-?[0-9]+,-?[0-9]+\]\[-?[0-9]+,-?[0-9]+\]/) {
-      s = substr($0, RSTART, RLENGTH)
-      sub(/^[A-Za-z]+=/, "", s)
-      gsub(/\]\[/, ",", s)
-      gsub(/[][]/, "", s)
-      if (split(s, a, ",") == 4) {
-        print cur, a[1], a[2], a[3], a[4]
-        seen[cur] = 1
-        cur = ""
-      }
-    }')
-  BOUNDS_WAKTU=$(date +%s)
-  fix_tty
-}
+  lg=$(rt "logcat -d --pid=$pid" 2>/dev/null | tr -d '\r' \
+    | grep -oiE 'place(id)?[ =:"]+[0-9]{6,}' | tail -n1)
+  place=$(grep -oE '[0-9]{6,}' <<<"$lg" | head -n1)
 
-# nomor task (jendela) milik sebuah paket
-ambil_task() {
-  local esc="${1//./\\.}"
-  rt "dumpsys activity activities" 2>/dev/null | tr -d '\r' \
-    | grep -E "Task(Record)?\{[0-9a-f]+ #[0-9]+ .*${esc}([^A-Za-z0-9_.]|$)" | head -n1 \
-    | sed -E 's/.*Task(Record)?\{[0-9a-f]+ #([0-9]+) .*/\2/'
-}
+  dat=$(rt "dumpsys activity activities" 2>/dev/null | tr -d '\r' | grep -F "$p/" \
+    | grep -oiE 'placeId=[0-9]+(&linkCode=[0-9A-Za-z_-]+)?' | tail -n1)
+  dplace=$(grep -oE 'placeId=[0-9]+' <<<"$dat" | grep -oE '[0-9]+')
 
-# bagi layar sesuai jumlah jendela -> satu baris "kiri atas kanan bawah" per jendela
-hitung_grid() {
-  local n="$1" W="$2" H="$3" cols rows cw ch i c r
-  if [ "$n" -le 3 ]; then
-    if [ "$H" -ge "$W" ]; then cols=1; rows=$n; else cols=$n; rows=1; fi
-  else
-    cols=2
-    while [ $((cols * cols)) -lt "$n" ]; do cols=$((cols + 1)); done
-    rows=$(((n + cols - 1) / cols))
-  fi
-  cw=$((W / cols))
-  ch=$((H / rows))
-  for ((i = 0; i < n; i++)); do
-    c=$((i % cols))
-    r=$((i / cols))
-    echo "$((c * cw)) $((r * ch)) $(((c + 1) * cw)) $(((r + 1) * ch))"
-  done
-}
-
-dekat() {   # selisih dua angka masih wajar? (toleransi 120 px)
-  local d=$(($1 - $2))
-  [ "${d#-}" -le 120 ]
-}
-
-cocok_posisi() {   # $1 = target "l t r b", $2 = terbaca "l t r b"
-  local a b c d e f g h
-  read -r a b c d <<<"$1"
-  read -r e f g h <<<"$2"
-  [ -n "$h" ] && dekat "$a" "$e" && dekat "$b" "$f" && dekat "$c" "$g" && dekat "$d" "$h"
-}
-
-terapkan_posisi() {
-  local p="$1" pos tid l t r b
-  pos="${POS_JENDELA[$p]:-}"
-  if [ -z "$pos" ]; then return 1; fi
-  read -r l t r b <<<"$pos"
-
-  tid=$(ambil_task "$p")
-  if [ -z "$tid" ]; then
-    echo " $p: jendela tidak ditemukan"
-    return 1
+  [ -z "$place" ] && place="$dplace"
+  if [ -n "$place" ] && [ "$place" = "$dplace" ]; then
+    kode=$(grep -oE 'linkCode=[0-9A-Za-z_-]+' <<<"$dat" | cut -d= -f2)
   fi
 
-  rt "am task resize $tid $l $t $r $b" >/dev/null 2>&1
-  sleep 1
-  ambil_bounds
-  if cocok_posisi "$pos" "${BOUNDS_CACHE[$p]:-}"; then
-    echo " $p: posisi OK"
+  if [ -n "$place" ] && [ "$place" != "0" ]; then
+    LAST_MAP[$p]="roblox://placeId=$place"
+    [ -n "$kode" ] && LAST_MAP[$p]="roblox://placeId=$place&linkCode=$kode"
     return 0
   fi
-
-  rt "am task resize $tid $l,$t,$r,$b" >/dev/null 2>&1
-  sleep 1
-  ambil_bounds
-  if cocok_posisi "$pos" "${BOUNDS_CACHE[$p]:-}"; then
-    echo " $p: posisi OK"
-    return 0
-  fi
-
-  echo " $p: belum cocok (lihat menu CEK PERANGKAT)"
   return 1
 }
 
-# tata semua jendela Roblox yang terdeteksi (PAKET harus sudah terisi)
-susun_jendela() {
-  local n="${#PAKET[@]}" ukuran W H i pos p
-  if [ "$n" -eq 0 ]; then return 1; fi
-
-  ukuran=$(ukuran_layar)
-  read -r W H <<<"$ukuran"
-  if ! [[ "$W" =~ ^[0-9]+$ ]] || ! [[ "$H" =~ ^[0-9]+$ ]]; then
-    echo "Ukuran layar tidak terbaca."
-    return 1
+# ---------- Keluar-masuk cepat ----------
+# force-stop lalu langsung buka lagi, semuanya dalam SATU panggilan root
+# supaya jedanya tepat (GAP_DETIK) dan tidak tertunda proses su.
+restart_cepat() {
+  local p="$1" url cmd out ms
+  deteksi_map "$p"                 # catat map sebelum aplikasi ditutup
+  url=$(map_untuk "$p")
+  cmd="am force-stop $p; T1=\$(date +%s%N); sleep $GAP_DETIK; $(perintah_buka "$p" "$url") >/dev/null 2>&1; T2=\$(date +%s%N); echo GAP=\$(( (T2 - T1) / 1000000 ))"
+  out=$(rt "$cmd" 2>/dev/null | tr -d '\r' | grep -oE 'GAP=[0-9]+' | tail -n1)
+  MULAI[$p]=$(date +%s)
+  ms="${out#GAP=}"
+  if [[ "$ms" =~ ^[0-9]+$ ]]; then
+    echo "   keluar -> masuk: ${ms} ms"
+    if [ "$ms" -gt 1000 ]; then
+      tulis "   Lebih dari 1 detik. Turunkan jeda di menu ATUR DELAY."
+    fi
   fi
-  H=$((H * AREA_PERSEN / 100))
-
-  i=0
-  while IFS= read -r pos; do
-    POS_JENDELA[${PAKET[$i]}]="$pos"
-    i=$((i + 1))
-  done < <(hitung_grid "$n" "$W" "$H")
-
-  echo "Layar ${W}x${H}, menata $n jendela:"
-  for p in "${PAKET[@]}"; do terapkan_posisi "$p"; done
-  ambil_bounds
-}
-
-# klik / geser di tengah jendela sebuah Roblox
-klik_roblox() {
-  local p="$1" l t r b cx cy
-  read -r l t r b <<<"${BOUNDS_CACHE[$p]:-}"
-  if [ -z "$b" ]; then return 1; fi
-  cx=$(((l + r) / 2))
-  cy=$(((t + b) / 2))
-  if [ "$AFK_MODE" = "2" ]; then
-    rt "input swipe $cx $cy $((cx + 40)) $cy 200" >/dev/null 2>&1
-  else
-    rt "input tap $cx $cy" >/dev/null 2>&1
+  if [ -z "$url" ]; then
+    tulis "   Map belum terdeteksi, Roblox dibuka tanpa map."
   fi
-}
-
-nama_mode_keluar() {
-  case "$MODE_KELUAR" in
-    2) echo "pindah ke map lain" ;;
-    3) echo "tutup aplikasi Roblox" ;;
-    *) echo "pintasan keyboard (Esc, L, Enter)" ;;
-  esac
-}
-
-# keluar dari map sesuai cara yang dipilih buyer
-keluar_map() {
-  local p="$1" l t r b
-  case "$MODE_KELUAR" in
-    2)
-      if [ -n "$MAP_TUJUAN" ]; then
-        rt "am start -a android.intent.action.VIEW -d '$MAP_TUJUAN' -p $p" >/dev/null 2>&1
-      fi
-      ;;
-    3)
-      rt "am force-stop $p" >/dev/null 2>&1
-      ;;
-    *)
-      ambil_bounds
-      read -r l t r b <<<"${BOUNDS_CACHE[$p]:-}"
-      if [ -n "$b" ]; then
-        rt "input tap $(((l + r) / 2)) $(((t + b) / 2))" >/dev/null 2>&1   # fokus ke jendela ini
-      else
-        rt "monkey -p $p -c android.intent.category.LAUNCHER 1" >/dev/null 2>&1
-      fi
-      sleep 1
-      rt "input keyevent 111" >/dev/null 2>&1   # Esc (buka menu)
-      sleep 2
-      rt "input keyevent 40" >/dev/null 2>&1    # L (Leave)
-      sleep 2
-      rt "input keyevent 66" >/dev/null 2>&1    # Enter (konfirmasi)
-      ;;
-  esac
 }
 
 launch_semua() {
@@ -436,165 +293,51 @@ launch_semua() {
   for p in "${PAKET[@]}"; do
     i=$((i + 1))
     echo "[$i/${#PAKET[@]}] Membuka $p"
-    SELESAI[$p]=0
-    TMULAI[$p]=$(date +%s)
-    if [ "${TIMER_JADWAL[$p]:-0}" -gt 0 ] && [ "${TIMER_JADWAL[$p]}" -le "$(date +%s)" ]; then
-      echo "   jadwal off sudah lewat, dilewati"
-      TIMER_JADWAL[$p]=0
-    fi
     buka "$p"
     if [ $i -lt ${#PAKET[@]} ]; then jeda; fi
   done
   echo
   echo "Semua Roblox sudah dibuka."
-  if [ "$POSISI_AKTIF" = "1" ]; then
-    echo
-    echo "Menata jendela (tunggu sebentar)..."
-    sleep 6
-    susun_jendela
-  fi
   return 0
 }
 
-punya_timer() {
-  [ "${TIMER_MENIT[$1]:-0}" -gt 0 ] || [ "${TIMER_JADWAL[$1]:-0}" -gt 0 ]
+# ---------- Jadwal ----------
+punya_jadwal() {
+  [ -n "${JADWAL_TIPE[$1]:-}" ]
 }
 
-ada_timer() {
+ada_jadwal() {
+  local p
   for p in "${PAKET[@]}"; do
-    if punya_timer "$p"; then return 0; fi
+    if punya_jadwal "$p"; then return 0; fi
   done
   return 1
 }
 
-# apakah timer paket $1 sudah habis pada waktu $2 (epoch)?
-timer_habis() {
-  local p="$1" now="$2"
-  local j="${TIMER_JADWAL[$p]:-0}" t="${TIMER_MENIT[$p]:-0}"
-  if [ "$j" -gt 0 ] && [ "$now" -ge "$j" ]; then return 0; fi
-  if [ "$t" -gt 0 ] && [ $((now - ${TMULAI[$p]:-$now})) -ge $((t * 60)) ]; then return 0; fi
-  return 1
-}
-
-# rejoin=1 : kalau Roblox mati, luncurkan lagi
-# rejoin=0 : hanya mengurus timer / anti AFK
-pantau() {
-  local rejoin="$1" now last=0 p sisa
-  STOP=0
-  echo
-  tulis "Memantau... (CTRL+C untuk berhenti)"
-
-  if [ "$AFK_AKTIF" = "1" ]; then
-    ambil_bounds
-    now=$(date +%s)
-    for p in "${PAKET[@]}"; do NEXT_KLIK[$p]=$((now + AFK_DETIK)); done
-  fi
-
-  while [ "$STOP" = "0" ]; do
-    now=$(date +%s)
-    fix_tty
-
-    # --- anti AFK: klik tengah tiap Roblox ---
-    if [ "$AFK_AKTIF" = "1" ]; then
-      if [ $((now - BOUNDS_WAKTU)) -ge 30 ]; then ambil_bounds; fi
-      for p in "${PAKET[@]}"; do
-        [ "${SELESAI[$p]:-0}" = "1" ] && continue
-        if [ "$now" -ge "${NEXT_KLIK[$p]:-0}" ]; then
-          klik_roblox "$p"
-          NEXT_KLIK[$p]=$((now + AFK_DETIK))
-        fi
-      done
+# waktu terdekat dari daftar jam "06:00,12:00"
+next_harian() {
+  local x e best=0 now
+  now=$(date +%s)
+  for x in ${1//,/ }; do
+    e=$(date -d "today $x" +%s 2>/dev/null) || continue
+    if [ "$e" -le "$now" ]; then
+      e=$(date -d "tomorrow $x" +%s 2>/dev/null) || continue
     fi
-
-    # --- timer & rejoin: dicek tiap 10 detik ---
-    if [ $((now - last)) -ge 10 ]; then
-      last=$now
-
-      for p in "${PAKET[@]}"; do
-        [ "${SELESAI[$p]:-0}" = "1" ] && continue
-
-        # timer habis -> keluar map (rejoin tidak berjalan lagi untuk Roblox ini)
-        if timer_habis "$p" "$now"; then
-          tulis "[$(date +%T)] Timer habis: $p -> keluar map"
-          keluar_map "$p"
-          SELESAI[$p]=1
-          TIMER_JADWAL[$p]=0
-          pesan_timer "$p"
-          continue
-        fi
-
-        # Roblox mati -> luncurkan lagi
-        if [ "$rejoin" = "1" ] && ! sedang_jalan "$p"; then
-          # kasih waktu 60 detik setelah peluncuran sebelum dianggap mati
-          if [ $((now - ${MULAI[$p]:-0})) -ge 60 ]; then
-            tulis "[$(date +%T)] $p mati -> diluncurkan ulang"
-            pesan_fc "$p"
-            buka "$p"
-            jeda
-            if [ "$POSISI_AKTIF" = "1" ]; then
-              sleep 6
-              terapkan_posisi "$p" >/dev/null
-            fi
-          fi
-        fi
-      done
-
-      # mode tanpa rejoin: berhenti kalau tidak ada lagi yang perlu dipantau
-      if [ "$rejoin" = "0" ]; then
-        sisa=0
-        for p in "${PAKET[@]}"; do
-          [ "${SELESAI[$p]:-0}" = "1" ] && continue
-          if [ "$AFK_AKTIF" = "1" ] || punya_timer "$p"; then sisa=1; fi
-        done
-        if [ $sisa -eq 0 ]; then
-          echo "Semua timer selesai."
-          break
-        fi
-      fi
-    fi
-
-    sleep 1
+    if [ "$best" -eq 0 ] || [ "$e" -lt "$best" ]; then best=$e; fi
   done
-
-  if [ "$STOP" = "1" ]; then
-    echo
-    echo "Pemantauan dihentikan."
-  fi
-  fix_tty
+  echo "$best"
 }
 
-# ---------- Menu ----------
-baca_map() {
-  tulis "Masukkan Place ID atau link game/private server."
-  tulis "Contoh: 920587237"
-  tulis "atau link: https://www.roblox.com/games/920587237?privateServerLinkCode=12345"
-  echo
-  read -r -p "Place ID / link: " INPUT
-  local place kode
-  place=$(echo "$INPUT" | grep -oE '[0-9]{4,}' | head -n1)
-  kode=$(echo "$INPUT" | grep -oE 'privateServerLinkCode=[0-9A-Za-z_-]+' | cut -d= -f2)
-
-  if [ -z "$place" ]; then
-    echo "Place ID tidak terbaca."
-    return 1
-  fi
-
-  MAP_HASIL="roblox://placeId=$place"
-  if [ -n "$kode" ]; then
-    MAP_HASIL="roblox://placeId=$place&linkCode=$kode"
-  fi
-  return 0
+hitung_next() {
+  local p="$1" now
+  now=$(date +%s)
+  case "${JADWAL_TIPE[$p]:-}" in
+    interval) NEXT_RESTART[$p]=$((now + ${JADWAL_NILAI[$p]} * 60)) ;;
+    harian) NEXT_RESTART[$p]=$(next_harian "${JADWAL_NILAI[$p]}") ;;
+    *) NEXT_RESTART[$p]=0 ;;
+  esac
 }
 
-tanya_map() {
-  if baca_map; then
-    PLACE_URL="$MAP_HASIL"
-    return 0
-  fi
-  return 1
-}
-
-# ---------- Timer ----------
 format_durasi() {
   local m="$1" h j s out=""
   h=$((m / 1440)); j=$(((m % 1440) / 60)); s=$((m % 60))
@@ -604,120 +347,182 @@ format_durasi() {
   echo "${out% }"
 }
 
-ket_timer() {
+ket_jadwal() {
   local p="$1"
-  if [ "${TIMER_JADWAL[$p]:-0}" -gt 0 ]; then
-    echo "off $(date -d "@${TIMER_JADWAL[$p]}" '+%d/%m %H:%M')"
-  elif [ "${TIMER_MENIT[$p]:-0}" -gt 0 ]; then
-    echo "durasi $(format_durasi "${TIMER_MENIT[$p]}")"
-  else
-    echo "tanpa timer"
-  fi
+  case "${JADWAL_TIPE[$p]:-}" in
+    interval) echo "tiap $(format_durasi "${JADWAL_NILAI[$p]}")" ;;
+    harian) echo "harian ${JADWAL_NILAI[$p]}" ;;
+    *) echo "tanpa jadwal" ;;
+  esac
 }
 
-# cari waktu terdekat (di masa depan) untuk tanggal & jam yang dipilih
-hitung_jadwal() {
-  local tgl=$((10#$1)) jam=$((10#$2)) mnt=$((10#$3)) i ym e now
-  now=$(date +%s)
-  for i in 0 1 2 3 4 5 6 7 8 9 10 11 12; do
-    ym=$(date -d "$(date +%Y-%m-01) +$i month" +%Y-%m 2>/dev/null) || continue
-    e=$(date -d "$ym-$(printf '%02d' "$tgl") $(printf '%02d' "$jam"):$(printf '%02d' "$mnt"):00" +%s 2>/dev/null) || continue
-    if [ "$e" -gt "$now" ]; then
-      echo "$e"
-      return 0
-    fi
-  done
-  return 1
-}
-
-baca_angka() {   # hasil di $ANGKA, kosong dianggap 0
-  local x
-  while true; do
-    read -r -p "$1" x
-    [ -z "$x" ] && x=0
-    if [[ "$x" =~ ^[0-9]+$ ]]; then
-      ANGKA=$((10#$x))
-      return
-    fi
-    echo "  harus angka"
-  done
-}
-
-timer_durasi() {
-  local p="$1" h j m total
+jadwal_interval() {
+  local p="$1" m
   echo
-  tulis "Isi angka, kosong = 0. Timer mulai dihitung saat Roblox diluncurkan."
-  baca_angka "Hari  : "; h=$ANGKA
-  baca_angka "Jam   : "; j=$ANGKA
-  baca_angka "Menit : "; m=$ANGKA
-  total=$((h * 1440 + j * 60 + m))
-  if [ "$total" -le 0 ]; then
-    TIMER_MENIT[$p]=0
-    echo "Durasi 0, timer dihapus."
-  else
-    TIMER_MENIT[$p]=$total
-    TIMER_JADWAL[$p]=0
-    echo "Timer: $(format_durasi "$total")"
-  fi
-  sleep 2
-}
-
-timer_jadwal() {
-  local p="$1" tgl jm jam mnt e
-  echo
-  tulis "Roblox ditutup pada tanggal & jam yang dipilih (format 24 jam, ikut jam Redfinger)."
-  read -r -p "Tanggal (1-31): " tgl
-  if ! [[ "$tgl" =~ ^[0-9]+$ ]] || [ "$((10#$tgl))" -lt 1 ] || [ "$((10#$tgl))" -gt 31 ]; then
-    echo "Tanggal tidak valid."
+  tulis "Roblox keluar lalu masuk lagi setiap berapa menit?"
+  read -r -p "Menit (minimal 1): " m
+  if ! [[ "$m" =~ ^[0-9]+$ ]] || [ "$((10#$m))" -lt 1 ]; then
+    echo "Harus angka, minimal 1."
     sleep 2
-    return
+    return 1
   fi
-  read -r -p "Jam:menit (contoh 00:10): " jm
-  if ! [[ "$jm" =~ ^([01]?[0-9]|2[0-3]):([0-5][0-9])$ ]]; then
+  JADWAL_TIPE[$p]="interval"
+  JADWAL_NILAI[$p]=$((10#$m))
+  echo "Jadwal: tiap $(format_durasi "${JADWAL_NILAI[$p]}")"
+  sleep 1
+}
+
+jadwal_harian() {
+  local p="$1" jm x ok=1
+  echo
+  tulis "Isi jam keluar-masuk (format 24 jam, ikut jam Redfinger)."
+  tulis "Boleh lebih dari satu, pisah koma. Contoh: 06:00,12:00,18:30"
+  read -r -p "Jam: " jm
+  jm="${jm// /}"
+  if [ -z "$jm" ]; then
+    echo "Kosong, tidak diubah."
+    sleep 1
+    return 1
+  fi
+  for x in ${jm//,/ }; do
+    [[ "$x" =~ ^([01]?[0-9]|2[0-3]):[0-5][0-9]$ ]] || ok=0
+  done
+  if [ "$ok" -ne 1 ]; then
     echo "Format jam salah."
     sleep 2
-    return
+    return 1
   fi
-  jam="${BASH_REMATCH[1]}"
-  mnt="${BASH_REMATCH[2]}"
-  e=$(hitung_jadwal "$tgl" "$jam" "$mnt")
-  if [ -z "$e" ]; then
-    echo "Tanggal tidak ditemukan."
-    sleep 2
-    return
-  fi
-  TIMER_JADWAL[$p]=$e
-  TIMER_MENIT[$p]=0
-  echo "Roblox akan ditutup:"
-  echo "$(date -d "@$e" '+%d/%m/%Y %H:%M')"
-  sleep 2
+  JADWAL_TIPE[$p]="harian"
+  JADWAL_NILAI[$p]="$jm"
+  echo "Jadwal: harian $jm"
+  sleep 1
 }
 
-atur_timer_satu() {
-  local p="$1" pil
+hapus_jadwal() {
+  JADWAL_TIPE[$1]=""
+  JADWAL_NILAI[$1]=""
+  NEXT_RESTART[$1]=0
+}
+
+atur_jadwal_satu() {
+  local p="$1" pil jawab q
   header
   echo "$p"
-  echo "Timer: $(ket_timer "$p")"
+  echo "Jadwal: $(ket_jadwal "$p")"
   echo
-  echo "1. Durasi (hari/jam/menit)"
-  echo "2. Jadwal (tanggal & jam)"
-  echo "3. Hapus timer"
+  echo "1. Setiap N menit (berulang)"
+  echo "2. Jam harian (bisa banyak jam)"
+  echo "3. Hapus jadwal"
   echo "0. Kembali"
   echo
   read -r -p "Pilih: " pil
   case "$pil" in
-    1) timer_durasi "$p" ;;
-    2) timer_jadwal "$p" ;;
-    3)
-      TIMER_MENIT[$p]=0
-      TIMER_JADWAL[$p]=0
-      echo "Timer dihapus."
-      sleep 1
-      ;;
+    1) jadwal_interval "$p" || return ;;
+    2) jadwal_harian "$p" || return ;;
+    3) hapus_jadwal "$p"; echo "Jadwal dihapus."; sleep 1; return ;;
+    *) return ;;
   esac
+  if [ ${#PAKET[@]} -gt 1 ]; then
+    read -r -p "Samakan untuk semua Roblox? (y/n): " jawab
+    if [[ "$jawab" =~ ^[yY]$ ]]; then
+      for q in "${PAKET[@]}"; do
+        JADWAL_TIPE[$q]="${JADWAL_TIPE[$p]}"
+        JADWAL_NILAI[$q]="${JADWAL_NILAI[$p]}"
+      done
+      echo "Dipakai untuk semua Roblox."
+      sleep 1
+    fi
+  fi
 }
 
-menu_timer() {
+# ---------- Pemantauan ----------
+# - jadwal tiba  -> keluar & masuk lagi (cepat)
+# - Roblox mati  -> buka lagi, masuk ke map terakhir
+pantau() {
+  local now last=0 lastdet=0 p
+  STOP=0
+  now=$(date +%s)
+  for p in "${PAKET[@]}"; do hitung_next "$p"; done
+
+  echo
+  tulis "Memantau... (CTRL+C untuk berhenti)"
+  for p in "${PAKET[@]}"; do
+    if punya_jadwal "$p"; then
+      echo " $p: $(ket_jadwal "$p"), berikut $(date -d "@${NEXT_RESTART[$p]}" '+%d/%m %H:%M')"
+    fi
+  done
+
+  while [ "$STOP" = "0" ]; do
+    now=$(date +%s)
+    fix_tty
+
+    # --- jadwal keluar-masuk ---
+    for p in "${PAKET[@]}"; do
+      if punya_jadwal "$p" && [ "$now" -ge "${NEXT_RESTART[$p]:-0}" ]; then
+        tulis "[$(date +%T)] Jadwal: $p keluar-masuk"
+        restart_cepat "$p"
+        hitung_next "$p"
+        pesan_jadwal "$p"
+        echo "   berikut: $(date -d "@${NEXT_RESTART[$p]}" '+%d/%m %H:%M')"
+        if [ ${#PAKET[@]} -gt 1 ]; then jeda; fi
+        now=$(date +%s)
+      fi
+    done
+
+    # --- cek mati & catat map: tiap 10 detik ---
+    if [ $((now - last)) -ge 10 ]; then
+      last=$now
+      for p in "${PAKET[@]}"; do
+        if sedang_jalan "$p"; then
+          if [ $((now - lastdet)) -ge 60 ]; then deteksi_map "$p"; fi
+        elif [ $((now - ${MULAI[$p]:-0})) -ge 60 ]; then
+          # beri waktu 60 detik setelah peluncuran sebelum dianggap mati
+          tulis "[$(date +%T)] $p mati -> dibuka lagi"
+          pesan_fc "$p"
+          buka "$p"
+          if [ ${#PAKET[@]} -gt 1 ]; then jeda; fi
+        fi
+      done
+      if [ $((now - lastdet)) -ge 60 ]; then lastdet=$now; fi
+    fi
+
+    sleep 1
+  done
+
+  echo
+  echo "Pemantauan dihentikan."
+  fix_tty
+}
+
+# ---------- Map ----------
+# Enter kosong = pakai map terakhir yang dimainkan (otomatis)
+tanya_map() {
+  tulis "Link map / Place ID (opsional)."
+  tulis "Kosongkan (Enter) = Roblox masuk ke map terakhir yang dimainkan."
+  tulis "Contoh: 920587237"
+  echo
+  read -r -p "Place ID / link: " INPUT
+  PLACE_URL=""
+  if [ -z "$INPUT" ]; then
+    echo "Pakai map terakhir (dideteksi otomatis)."
+    return 0
+  fi
+  local place kode
+  place=$(echo "$INPUT" | grep -oE '[0-9]{4,}' | head -n1)
+  kode=$(echo "$INPUT" | grep -oE 'privateServerLinkCode=[0-9A-Za-z_-]+' | cut -d= -f2)
+  if [ -z "$place" ]; then
+    echo "Place ID tidak terbaca."
+    return 1
+  fi
+  PLACE_URL="roblox://placeId=$place"
+  if [ -n "$kode" ]; then
+    PLACE_URL="roblox://placeId=$place&linkCode=$kode"
+  fi
+  return 0
+}
+
+# ---------- Menu ----------
+menu_jadwal() {
   header
   cari_roblox
   if [ ${#PAKET[@]} -eq 0 ]; then
@@ -726,58 +531,40 @@ menu_timer() {
     return
   fi
 
-  local pil i p nowt
+  local pil i p
   while true; do
     header
-    echo "TIMER (1 timer untuk 1 Roblox)"
+    echo "JADWAL KELUAR-MASUK"
     echo "Jam Redfinger: $(date '+%d/%m %H:%M')"
     echo
     i=0
     for p in "${PAKET[@]}"; do
       i=$((i + 1))
       echo "$i. $p"
-      echo "   $(ket_timer "$p")"
+      echo "   $(ket_jadwal "$p")"
     done
     echo
-    echo "H. Hapus semua timer"
-    echo "M. Mulai pantau timer"
-    echo "K. Cara keluar map"
+    echo "H. Hapus semua jadwal"
+    echo "M. Mulai pantau (tanpa membuka ulang)"
     echo "0. Kembali"
     echo
     read -r -p "Pilih: " pil
 
     case "$pil" in
       0) return ;;
-      [Kk]) menu_keluar_map ;;
       [Hh])
-        for p in "${PAKET[@]}"; do
-          TIMER_MENIT[$p]=0
-          TIMER_JADWAL[$p]=0
-        done
-        echo "Semua timer dihapus."
+        for p in "${PAKET[@]}"; do hapus_jadwal "$p"; done
+        echo "Semua jadwal dihapus."
         sleep 1
         ;;
       [Mm])
-        if ! ada_timer; then
-          echo "Belum ada timer."
-          sleep 2
-        else
-          nowt=$(date +%s)
-          for p in "${PAKET[@]}"; do
-            SELESAI[$p]=0
-            TMULAI[$p]=$nowt
-            if [ "${TIMER_JADWAL[$p]:-0}" -gt 0 ] && [ "${TIMER_JADWAL[$p]}" -le "$nowt" ]; then
-              TIMER_JADWAL[$p]=0
-            fi
-          done
-          tulis "Memantau timer tanpa membuka ulang Roblox."
-          pantau 0
-          tunggu_enter
-        fi
+        tulis "Memantau Roblox yang sedang jalan."
+        pantau
+        tunggu_enter
         ;;
       *)
         if [[ "$pil" =~ ^[0-9]+$ ]] && [ "$pil" -ge 1 ] && [ "$pil" -le ${#PAKET[@]} ]; then
-          atur_timer_satu "${PAKET[$((pil - 1))]}"
+          atur_jadwal_satu "${PAKET[$((pil - 1))]}"
         else
           echo "Pilihan tidak ada."
           sleep 1
@@ -788,24 +575,40 @@ menu_timer() {
 }
 
 menu_delay() {
-  header
-  tulis "ATUR DELAY antar Roblox saat dibuka"
-  tulis "(rekomendasi 5-10 detik)"
-  echo
-  echo "Delay sekarang: ${DELAY_DETIK} detik"
-  read -r -p "Delay baru (detik): " d
-  if [ -z "$d" ]; then
-    echo "Tidak diubah."
-  elif [[ "$d" =~ ^[0-9]+$ ]] && [ "$d" -ge 1 ] && [ "$d" -le 120 ]; then
-    DELAY_DETIK=$d
-    echo "Delay diatur ke ${DELAY_DETIK} detik."
-    if [ "$d" -lt 5 ]; then
-      tulis "Peringatan: di bawah 5 detik berisiko membuat cloud crash."
-    fi
-  else
-    tulis "Harus angka 1 sampai 120."
-  fi
-  tunggu_enter
+  local pil d
+  while true; do
+    header
+    echo "ATUR DELAY"
+    echo
+    echo "1. Antar Roblox saat dibuka : ${DELAY_DETIK} detik"
+    echo "2. Keluar -> masuk (jadwal) : ${GAP_DETIK} detik"
+    echo "0. Kembali"
+    echo
+    read -r -p "Pilih: " pil
+    case "$pil" in
+      1)
+        tulis "Rekomendasi 5-10 detik. Di bawah 5 detik berisiko cloud crash."
+        read -r -p "Detik (1-120): " d
+        if [[ "$d" =~ ^[0-9]+$ ]] && [ "$d" -ge 1 ] && [ "$d" -le 120 ]; then
+          DELAY_DETIK=$d
+        elif [ -n "$d" ]; then
+          echo "Harus angka 1 sampai 120."
+          sleep 2
+        fi
+        ;;
+      2)
+        tulis "Pilih 0.3 sampai 1 detik (maksimal 1)."
+        read -r -p "Detik (contoh 0.5): " d
+        if [[ "$d" =~ ^(0\.[3-9]|1|1\.0)$ ]]; then
+          GAP_DETIK=$d
+        elif [ -n "$d" ]; then
+          echo "Harus 0.3 sampai 1."
+          sleep 2
+        fi
+        ;;
+      0) return ;;
+    esac
+  done
 }
 
 tutup_semua() {
@@ -835,170 +638,34 @@ tutup_semua() {
   tunggu_enter
 }
 
-menu_afk() {
-  local pil d
-  while true; do
-    header
-    echo "ANTI AFK (AUTO KLIK)"
-    tulis "Klik tengah jendela tiap Roblox supaya tidak dianggap diam. Berjalan saat menu 1 atau 2 dijalankan."
-    echo
-    if [ "$AFK_AKTIF" = "1" ]; then echo "Status  : AKTIF"; else echo "Status  : MATI"; fi
-    echo "Interval: ${AFK_DETIK} detik (3-50)"
-    if [ "$AFK_MODE" = "2" ]; then echo "Mode    : geser kecil"; else echo "Mode    : ketuk"; fi
-    echo
-    echo "1. Aktif / matikan"
-    echo "2. Atur interval"
-    echo "3. Ganti mode klik"
-    echo "0. Kembali"
-    echo
-    read -r -p "Pilih: " pil
-    case "$pil" in
-      1)
-        if [ "$AFK_AKTIF" = "1" ]; then AFK_AKTIF=0; else AFK_AKTIF=1; fi
-        ;;
-      2)
-        read -r -p "Interval (3-50 detik): " d
-        if [[ "$d" =~ ^[0-9]+$ ]] && [ "$d" -ge 3 ] && [ "$d" -le 50 ]; then
-          AFK_DETIK=$d
-        else
-          echo "Harus angka 3 sampai 50."
-          sleep 2
-        fi
-        ;;
-      3)
-        if [ "$AFK_MODE" = "2" ]; then AFK_MODE=1; else AFK_MODE=2; fi
-        ;;
-      0) return ;;
-    esac
-  done
-}
-
-menu_posisi() {
-  local pil d
-  while true; do
-    header
-    echo "AUTO POSISI"
-    tulis "Jendela Roblox ditata rapi di layar saat auto launch, supaya tidak saling menimpa."
-    echo
-    if [ "$POSISI_AKTIF" = "1" ]; then echo "Status      : AKTIF"; else echo "Status      : MATI"; fi
-    echo "Tinggi area : ${AREA_PERSEN}% layar"
-    echo
-    echo "1. Aktif / matikan"
-    echo "2. Atur tinggi area"
-    echo "3. Susun sekarang (tes)"
-    echo "0. Kembali"
-    echo
-    read -r -p "Pilih: " pil
-    case "$pil" in
-      1)
-        if [ "$POSISI_AKTIF" = "1" ]; then POSISI_AKTIF=0; else POSISI_AKTIF=1; fi
-        ;;
-      2)
-        read -r -p "Tinggi area (30-100): " d
-        if [[ "$d" =~ ^[0-9]+$ ]] && [ "$d" -ge 30 ] && [ "$d" -le 100 ]; then
-          AREA_PERSEN=$d
-        else
-          echo "Harus angka 30 sampai 100."
-          sleep 2
-        fi
-        ;;
-      3)
-        header
-        cari_roblox
-        if [ ${#PAKET[@]} -eq 0 ]; then
-          tulis "Tidak ada Roblox (com.roblox) yang terdeteksi."
-        else
-          susun_jendela
-        fi
-        tunggu_enter
-        ;;
-      0) return ;;
-    esac
-  done
-}
-
-tes_keluar_map() {
-  local i p pil
-  header
-  cari_roblox
-  if [ ${#PAKET[@]} -eq 0 ]; then
-    tulis "Tidak ada Roblox (com.roblox) yang terdeteksi."
-    tunggu_enter
-    return
-  fi
-  echo "Pilih Roblox untuk dites:"
-  i=0
-  for p in "${PAKET[@]}"; do
-    i=$((i + 1))
-    echo "$i. $p"
-  done
-  echo
-  read -r -p "Nomor: " pil
-  if [[ "$pil" =~ ^[0-9]+$ ]] && [ "$pil" -ge 1 ] && [ "$pil" -le ${#PAKET[@]} ]; then
-    p="${PAKET[$((pil - 1))]}"
-    tulis "Cara: $(nama_mode_keluar). Perhatikan layar Roblox..."
-    keluar_map "$p"
-    echo "Selesai dijalankan."
-  else
-    echo "Pilihan tidak ada."
-  fi
-  tunggu_enter
-}
-
-menu_keluar_map() {
-  local pil
-  while true; do
-    header
-    tulis "CARA KELUAR MAP saat timer habis"
-    echo
-    tulis "Sekarang: $(nama_mode_keluar)"
-    if [ "$MODE_KELUAR" = "2" ]; then tulis "Map tujuan: ${MAP_TUJUAN:-belum diatur}"; fi
-    echo
-    echo "1. Pintasan keyboard"
-    echo "2. Pindah ke map lain"
-    echo "3. Tutup aplikasi"
-    echo "4. Tes sekarang"
-    echo "0. Kembali"
-    echo
-    read -r -p "Pilih: " pil
-    case "$pil" in
-      1) MODE_KELUAR=1 ;;
-      2)
-        echo
-        if baca_map; then
-          MAP_TUJUAN="$MAP_HASIL"
-          MODE_KELUAR=2
-        else
-          sleep 2
-        fi
-        ;;
-      3) MODE_KELUAR=3 ;;
-      4) tes_keluar_map ;;
-      0) return ;;
-    esac
-  done
-}
-
 menu_info() {
-  local p
+  local p pid
   header
   echo "CEK PERANGKAT"
   echo
   echo "Android : $(rt "getprop ro.build.version.release" 2>/dev/null | tr -d '\r')"
-  echo "Layar   : $(ukuran_layar | tr ' ' 'x')"
-  echo "DPI     : $(rt "wm density" 2>/dev/null | grep -oE '[0-9]+' | tail -n1)"
   if rt "id" 2>/dev/null | grep -q 'uid=0'; then echo "Root    : ya"; else echo "Root    : tidak"; fi
-  if rt "am help" 2>&1 | grep -qi 'task resize'; then echo "Atur jendela: ada"; else echo "Atur jendela: tidak terlihat"; fi
   echo
   cari_roblox
   if [ ${#PAKET[@]} -eq 0 ]; then
     tulis "Tidak ada Roblox (com.roblox) yang terdeteksi."
   else
-    ambil_bounds
     for p in "${PAKET[@]}"; do
       echo "$p"
-      echo "  task  : $(ambil_task "$p")"
-      echo "  posisi: ${BOUNDS_CACHE[$p]:-tidak terbaca}"
+      if sedang_jalan "$p"; then
+        pid=$(rt "pidof $p" 2>/dev/null | tr -d '\r' | awk '{print $1}')
+        echo "  status: jalan (pid $pid)"
+        if deteksi_map "$p"; then
+          echo "  map   : ${LAST_MAP[$p]}"
+        else
+          echo "  map   : belum terdeteksi"
+          echo "  --- log (untuk dicek) ---"
+          rt "logcat -d --pid=$pid" 2>/dev/null | tr -d '\r' | grep -iE 'place|join' | tail -n 5 | cut -c1-120
+        fi
+      else
+        echo "  status: tidak jalan"
+        echo "  map   : ${LAST_MAP[$p]:-belum terdeteksi}"
+      fi
     done
   fi
   tunggu_enter
@@ -1011,19 +678,15 @@ atur_webhook
 while true; do
   header
   if [ -n "$WEBHOOK" ]; then echo "Webhook : aktif"; else echo "Webhook : tidak dipakai"; fi
-  echo "Delay   : ${DELAY_DETIK} detik"
-  if [ "$AFK_AKTIF" = "1" ]; then echo "Anti AFK: aktif (${AFK_DETIK} dtk)"; else echo "Anti AFK: mati"; fi
-  if [ "$POSISI_AKTIF" = "1" ]; then echo "Posisi  : otomatis"; else echo "Posisi  : manual"; fi
+  echo "Delay   : ${DELAY_DETIK} dtk | keluar-masuk ${GAP_DETIK} dtk"
   echo
   echo "1. AUTO LAUNCH"
   echo "2. AUTO LAUNCH + RE JOIN"
-  echo "3. TIMER"
+  echo "3. JADWAL KELUAR-MASUK"
   echo "4. ATUR DELAY"
-  echo "5. ANTI AFK (AUTO KLIK)"
-  echo "6. AUTO POSISI"
-  echo "7. TUTUP SEMUA ROBLOX"
-  echo "8. CEK PERANGKAT"
-  echo "9. KELUAR"
+  echo "5. TUTUP SEMUA ROBLOX"
+  echo "6. CEK PERANGKAT / MAP"
+  echo "7. KELUAR"
   echo
   read -r -p "Pilih: " PILIH
 
@@ -1031,9 +694,7 @@ while true; do
     1)
       header
       PLACE_URL=""
-      if launch_semua; then
-        if ada_timer || [ "$AFK_AKTIF" = "1" ]; then pantau 0; fi
-      fi
+      launch_semua
       tunggu_enter
       ;;
     2)
@@ -1042,18 +703,16 @@ while true; do
         echo
         if launch_semua; then
           info_webhook "Auto launch + re join dimulai (${#PAKET[@]} Roblox)."
-          pantau 1
+          pantau
         fi
       fi
       tunggu_enter
       ;;
-    3) menu_timer ;;
+    3) menu_jadwal ;;
     4) menu_delay ;;
-    5) menu_afk ;;
-    6) menu_posisi ;;
-    7) tutup_semua ;;
-    8) menu_info ;;
-    9)
+    5) tutup_semua ;;
+    6) menu_info ;;
+    7)
       echo "Sampai jumpa!"
       exit 0
       ;;
