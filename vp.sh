@@ -24,6 +24,16 @@ declare -A LAUNCH_COMP   # nama aktivitas peluncur tiap Roblox (supaya buka apli
 JEDA_MS=0                # jeda keluar-masuk terakhir (milidetik)
 STOP=0                   # diisi 1 saat CTRL+C ditekan
 
+# --- masa aktif key ---
+AKTIF_FILE="$HOME/.vp_aktivasi"     # catatan waktu pemakaian pertama (di Termux)
+SD_FILE="/sdcard/.vp_aktivasi"      # salinan di penyimpanan, selamat kalau Termux dihapus
+KEY_HASH=""
+EXP_EPOCH=0
+LAST_VALIDASI=0
+DAFTAR=""
+WAKTU_SERVER=0
+DB_URL=""   # alamat database pencatat pemakaian (dibaca dari keys.txt, baris #db=)
+
 # Perintah root. Redfinger harus sudah di-root untuk force-stop & cek proses.
 if command -v su >/dev/null 2>&1; then
   SU="su -c"
@@ -83,6 +93,97 @@ tunggu_enter() {
 }
 
 # ---------- Cek key ----------
+# waktu pemakaian pertama sebuah key (paling awal dari dua catatan), kosong kalau belum pernah
+baca_aktivasi() {
+  local h="$1" a b
+  a=$(grep -s "^$h|" "$AKTIF_FILE" | tail -n1 | cut -d'|' -f2)
+  b=$(rt "cat $SD_FILE 2>/dev/null" 2>/dev/null | tr -d '\r' | grep "^$h|" | tail -n1 | cut -d'|' -f2)
+  [[ "$a" =~ ^[0-9]+$ ]] || a=""
+  [[ "$b" =~ ^[0-9]+$ ]] || b=""
+  # lengkapi catatan yang hilang (misal Termux baru dipasang ulang)
+  if [ -z "$a" ] && [ -n "$b" ]; then echo "$h|$b" >> "$AKTIF_FILE"; fi
+  if [ -n "$a" ] && [ -z "$b" ]; then rt "echo '$h|$a' >> $SD_FILE" >/dev/null 2>&1; fi
+  if [ -n "$a" ] && [ -n "$b" ]; then
+    if [ "$a" -le "$b" ]; then echo "$a"; else echo "$b"; fi
+  else
+    echo "${a:-$b}"
+  fi
+}
+
+tulis_aktivasi() {
+  echo "$1|$2" >> "$AKTIF_FILE"
+  rt "echo '$1|$2' >> $SD_FILE" >/dev/null 2>&1
+}
+
+# ambil daftar key dari GitHub + waktu server (dari header Date, sulit dipalsukan)
+ambil_daftar() {
+  local tmp="${TMPDIR:-/tmp}" h k d
+  h="$tmp/vp_h.$$"
+  k="$tmp/vp_k.$$"
+  if ! curl -fsSL --max-time 20 -D "$h" -o "$k" "$KEY_URL?t=$(date +%s)" 2>/dev/null; then
+    rm -f "$h" "$k"
+    return 1
+  fi
+  DAFTAR=$(tr -d '\r' < "$k")
+  DB_URL=$(printf '%s\n' "$DAFTAR" | grep -m1 '^#db=' | cut -d= -f2- | tr -d ' ')
+  [[ "$DB_URL" =~ ^https://[A-Za-z0-9.-]+\.(firebaseio\.com|firebasedatabase\.app)$ ]] || DB_URL=""
+  d=$(tr -d '\r' < "$h" | grep -i '^date:' | tail -n1 | cut -d' ' -f2-)
+  WAKTU_SERVER=$(date -d "$d" +%s 2>/dev/null)
+  [[ "$WAKTU_SERVER" =~ ^[0-9]+$ ]] || WAKTU_SERVER=$(date +%s)
+  rm -f "$h" "$k"
+  return 0
+}
+
+# hitung kapan key habis. Isi baris: "hash|jumlah hari" (hitung sejak pemakaian pertama)
+# atau "hash|YYYY-MM-DD" (format lama, tanggal pasti)
+hitung_exp() {
+  local nilai now="$2" akt
+  nilai=$(printf '%s' "$1" | cut -d'|' -f2 | tr -d ' ')
+  if [[ "$nilai" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    EXP_EPOCH=$(date -d "$nilai 23:59:59" +%s 2>/dev/null)
+  elif [[ "$nilai" =~ ^[0-9]+$ ]]; then
+    akt=$(baca_aktivasi "$KEY_HASH")
+    if [ -z "$akt" ]; then
+      akt="$now"
+      tulis_aktivasi "$KEY_HASH" "$akt"
+    fi
+    EXP_EPOCH=$((akt + nilai * 86400))
+  else
+    return 1
+  fi
+  [[ "$EXP_EPOCH" =~ ^[0-9]+$ ]]
+}
+
+# key diblokir admin? (kolom ke-3 bernilai B)
+key_diblokir() {
+  [ "$(printf '%s' "$1" | cut -d'|' -f3 | tr -d ' ')" = "B" ]
+}
+
+# pengenal perangkat: android_id Redfinger, atau angka acak yang disimpan kalau tidak terbaca
+id_perangkat() {
+  local id
+  id=$(rt "settings get secure android_id" 2>/dev/null | tr -d '\r\n ')
+  if ! [[ "$id" =~ ^[0-9a-fA-F]{8,}$ ]]; then
+    id=$(cat "$HOME/.vp_dev" 2>/dev/null)
+    if [ -z "$id" ]; then
+      id=$(tr -dc 'a-f0-9' </dev/urandom | head -c 16)
+      echo "$id" > "$HOME/.vp_dev"
+    fi
+  fi
+  echo "${id:0:12}"
+}
+
+# catat satu pemakaian ke database (hanya menambah catatan baru, tidak bisa mengubah yang lama)
+lapor_pemakaian() {
+  local dev
+  if [ -z "$DB_URL" ]; then return 0; fi
+  dev=$(id_perangkat)
+  curl -s -m 8 -X POST \
+    -d "{\"dev\":\"$dev\",\"t\":{\".sv\":\"timestamp\"}}" \
+    "$DB_URL/pakai/$KEY_HASH.json" >/dev/null 2>&1
+  return 0
+}
+
 cek_key() {
   header
   read -r -p "Masukkan key kamu: " KEY
@@ -92,30 +193,66 @@ cek_key() {
   fi
 
   echo "Memeriksa key..."
-  DAFTAR=$(curl -fsSL --max-time 20 "$KEY_URL?t=$(date +%s)") || {
+  if ! ambil_daftar; then
     tulis "Gagal terhubung ke server key. Cek internet kamu."
     exit 1
-  }
+  fi
 
-  HASH=$(printf '%s' "$KEY" | sha256sum | cut -d' ' -f1)
-  BARIS=$(printf '%s\n' "$DAFTAR" | tr -d '\r' | grep -i "^$HASH|" | head -n1)
-
+  KEY_HASH=$(printf '%s' "$KEY" | sha256sum | cut -d' ' -f1)
+  BARIS=$(printf '%s\n' "$DAFTAR" | grep -i "^$KEY_HASH|" | head -n1)
   if [ -z "$BARIS" ]; then
     echo "Key salah."
     exit 1
   fi
 
-  EXP="${BARIS#*|}"
-  HARI_INI=$(date +%F)
-  if [[ "$HARI_INI" > "$EXP" ]]; then
-    tulis "Key sudah kedaluwarsa (berlaku sampai $EXP)."
+  if key_diblokir "$BARIS"; then
+    tulis "Key ini diblokir oleh admin."
     exit 1
   fi
 
-  echo "Key benar. Aktif sampai $EXP"
+  if ! hitung_exp "$BARIS" "$WAKTU_SERVER"; then
+    tulis "Data key rusak. Hubungi admin."
+    exit 1
+  fi
+  if [ "$WAKTU_SERVER" -ge "$EXP_EPOCH" ]; then
+    tulis "Key sudah kedaluwarsa ($(date -d "@$EXP_EPOCH" '+%d/%m/%Y %H:%M'))."
+    exit 1
+  fi
+
+  LAST_VALIDASI=$(date +%s)
+  lapor_pemakaian
+  echo "Key benar."
+  tulis "Aktif sampai $(date -d "@$EXP_EPOCH" '+%d/%m/%Y %H:%M')"
   sleep 2
 }
 
+# keluar dari launcher (Roblox yang sedang berjalan tidak ikut ditutup)
+keluar_habis() {
+  fix_tty
+  echo
+  tulis "$1"
+  tulis "Launcher ditutup. Roblox yang sedang berjalan tidak ikut ditutup."
+  exit 0
+}
+
+# cek ulang ke GitHub: key dihapus admin / masa aktif habis menurut waktu server
+validasi_ulang() {
+  local baris
+  LAST_VALIDASI=$(date +%s)
+  if ! ambil_daftar; then return 0; fi    # tidak ada internet: jangan ditendang
+  baris=$(printf '%s\n' "$DAFTAR" | grep -i "^$KEY_HASH|" | head -n1)
+  if [ -z "$baris" ]; then keluar_habis "Key kamu sudah tidak berlaku (dihapus admin)."; fi
+  if key_diblokir "$baris"; then keluar_habis "Key kamu diblokir oleh admin."; fi
+  if [ "$WAKTU_SERVER" -ge "$EXP_EPOCH" ]; then keluar_habis "Masa aktif key kamu sudah habis."; fi
+}
+
+# ringan, dipanggil sering: cek jam lokal, dan cek ulang ke GitHub tiap 5 menit
+cek_masa_aktif() {
+  local now
+  now=$(date +%s)
+  if [ "$now" -ge "$EXP_EPOCH" ]; then keluar_habis "Masa aktif key kamu sudah habis."; fi
+  if [ $((now - LAST_VALIDASI)) -ge 300 ]; then validasi_ulang; fi
+}
 # ---------- Webhook ----------
 atur_webhook() {
   header
@@ -343,6 +480,7 @@ pantau() {
   tulis "Memantau... (CTRL+C untuk berhenti)"
 
   while [ "$STOP" = "0" ]; do
+    cek_masa_aktif
     now=$(date +%s)
     fix_tty
 
@@ -700,6 +838,7 @@ cek_key
 atur_webhook
 
 while true; do
+  cek_masa_aktif
   header
   if [ -n "$WEBHOOK" ]; then echo "Webhook : aktif"; else echo "Webhook : tidak dipakai"; fi
   echo "Delay   : ${DELAY_DETIK} detik"
