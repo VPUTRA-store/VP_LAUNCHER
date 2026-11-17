@@ -1,1 +1,3 @@
 ea53017fa76f1d1c2e765352621de62cb06fd05e03b5de7ab6fe80c96102fc26|2026-12-15
+#db=https://vp-launcher-default-rtdb.asia-southeast1.firebasedatabase.app
+eaca961c64ddbd0c5489bb2a69c7875b170d848ec46cdbcbdf13b493dc4ab8b6|7
