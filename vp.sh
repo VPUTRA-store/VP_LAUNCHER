@@ -22,6 +22,15 @@ MAP_HASIL=""
 declare -A LAST_MAP      # map terakhir tiap Roblox (Place ID), dibaca otomatis dari catatan Roblox
 declare -A LAUNCH_COMP   # nama aktivitas peluncur tiap Roblox (supaya buka aplikasi cepat)
 JEDA_MS=0                # jeda keluar-masuk terakhir (milidetik)
+
+# --- status di dalam map atau tidak ---
+CPU_AMBANG=3             # CPU (persen) di atas ini dianggap sedang di dalam map
+declare -A UID_PKG       # uid tiap aplikasi Roblox
+declare -A PREV_TICK     # hitungan CPU sebelumnya
+declare -A PREV_WAKTU    # waktu hitungan CPU sebelumnya
+declare -A PERNAH_MAP    # 1 = sudah terlihat masuk map sejak dibuka
+declare -A KELUAR_CNT    # berapa kali berturut-turut terlihat tidak di map
+ST_PID=""; ST_CPU=""; ST_UDP=0; ST_DALAM=""
 STOP=0                   # diisi 1 saat CTRL+C ditekan
 
 # --- masa aktif key ---
@@ -283,7 +292,7 @@ info_webhook() {
 
 # pesan: Roblox force close lalu di-rejoin
 pesan_fc() {
-  local p="$1" msg
+  local p="$1" sebab="${2:-aplikasi tertutup (FC)}" msg
   IFS= read -r -d '' msg <<EOF
 ⚠️ ───────────────────────── ⚠️
        🚨 PERINGATAN 🚨
@@ -293,6 +302,7 @@ Akun Roblox kamu mengalami FORCE CLOSE (FC) secara tiba-tiba!
 
 📱 Roblox: \`$p\`
 🕐 Waktu: $(date '+%d/%m/%Y %H:%M:%S')
+🔎 Penyebab: $sebab
 
 🔄 Sistem sedang memproses perbaikan otomatis & melakukan RE-JOIN ulang ke dalam map.
 
@@ -382,9 +392,15 @@ komponen_launcher() {
 }
 
 # perintah untuk membuka Roblox (ke map kalau alamatnya diketahui)
+# mode "awal"  : hanya buka Roblox (masuk map hanya kalau buyer mengisi Place ID/link sendiri)
+# mode "rejoin": masuk ke map (link buyer, atau map terakhir yang terbaca otomatis)
 perintah_buka() {
-  local p="$1" url comp
-  url=$(url_map "$p")
+  local p="$1" mode="${2:-awal}" url comp
+  if [ "$mode" = "rejoin" ]; then
+    url=$(url_map "$p")
+  else
+    url="$PLACE_URL"
+  fi
   if [ -n "$url" ]; then
     echo "am start -a android.intent.action.VIEW -d '$url' -p $p"
   else
@@ -398,15 +414,15 @@ perintah_buka() {
 }
 
 buka() {
-  local p="$1"
-  rt "$(perintah_buka "$p")" >/dev/null 2>&1
+  local p="$1" mode="${2:-awal}"
+  rt "$(perintah_buka "$p" "$mode")" >/dev/null 2>&1
   MULAI[$p]=$(date +%s)
 }
 
 # keluar lalu masuk lagi dalam SATU perintah supaya jedanya sependek mungkin
 restart_cepat() {
   local p="$1" cmd t0 t1
-  cmd=$(perintah_buka "$p")   # disiapkan dulu, di luar hitungan jeda
+  cmd=$(perintah_buka "$p" awal)   # disiapkan dulu, di luar hitungan jeda
   t0=$(date +%s%N)
   rt "am force-stop $p; $cmd" >/dev/null 2>&1
   t1=$(date +%s%N)
@@ -419,6 +435,86 @@ jeda() {
   sleep "$DELAY_DETIK"
 }
 
+# ---------- Status: sedang di dalam map atau tidak ----------
+uid_paket() {
+  local p="$1" u
+  if [ -z "${UID_PKG[$p]:-}" ]; then
+    u=$(rt "stat -c %u /data/data/$p" 2>/dev/null | tr -d '\r\n ')
+    if ! [[ "$u" =~ ^[0-9]+$ ]]; then
+      u=$(rt "ls -ldn /data/data/$p" 2>/dev/null | tr -d '\r' | awk '{print $3}')
+    fi
+    if [[ "$u" =~ ^[0-9]+$ ]]; then UID_PKG[$p]="$u"; fi
+  fi
+  echo "${UID_PKG[$p]:-}"
+}
+
+# jumlah soket UDP milik aplikasi (tanpa DNS dan QUIC/443). Di dalam map ada koneksi UDP ke server game.
+jumlah_udp() {
+  local uid="$1"
+  if [ -z "$uid" ]; then echo 0; return; fi
+  rt "cat /proc/net/udp /proc/net/udp6" 2>/dev/null | tr -d '\r' | awk -v uid="$uid" '
+    $1 ~ /^[0-9]+:$/ && $8 == uid {
+      n = split($3, r, ":"); rp = toupper(r[n])
+      if (rp != "01BB" && rp != "0035") c++
+    }
+    END { print c + 0 }'
+}
+
+ticks_cpu() {   # $1 = pid -> pemakaian CPU kumulatif (tick)
+  rt "cat /proc/$1/stat" 2>/dev/null | tr -d '\r' | sed 's/^.*) //' | awk '{ print $12 + $13 }'
+}
+
+# periksa satu aplikasi. Hasil: ST_PID, ST_CPU, ST_UDP, ST_DALAM (1 = di map, 0 = tidak, kosong = belum bisa dinilai)
+# return 1 kalau aplikasinya mati
+periksa_map() {
+  local p="$1" pid uid tk now dt dtk
+  ST_PID=""; ST_CPU=""; ST_UDP=0; ST_DALAM=""
+  pid=$(rt "pidof $p" 2>/dev/null | tr -d '\r' | cut -d' ' -f1)
+  if [ -z "$pid" ]; then
+    unset "PREV_TICK[$p]"
+    return 1
+  fi
+  ST_PID="$pid"
+  uid=$(uid_paket "$p")
+  ST_UDP=$(jumlah_udp "$uid")
+  tk=$(ticks_cpu "$pid")
+  now=$(date +%s)
+  if [[ "$tk" =~ ^[0-9]+$ ]]; then
+    if [ -n "${PREV_TICK[$p]:-}" ]; then
+      dt=$((now - ${PREV_WAKTU[$p]}))
+      if [ "$dt" -lt 1 ]; then dt=1; fi
+      dtk=$((tk - ${PREV_TICK[$p]}))
+      if [ "$dtk" -lt 0 ]; then dtk=0; fi
+      ST_CPU=$((dtk / dt))
+    fi
+    PREV_TICK[$p]=$tk
+    PREV_WAKTU[$p]=$now
+  fi
+  if [ "$ST_UDP" -ge 1 ]; then
+    ST_DALAM=1
+  elif [ -n "$ST_CPU" ]; then
+    if [ "$ST_CPU" -ge "$CPU_AMBANG" ]; then ST_DALAM=1; else ST_DALAM=0; fi
+  fi
+  return 0
+}
+
+# masuk lagi ke map untuk Roblox yang sudah keluar dari map (aplikasinya masih hidup)
+rejoin_map() {
+  local p="$1" n="${1#com.roblox.}"
+  if [ -z "$(url_map "$p")" ]; then
+    tulis "[$(date +%T)] $n keluar map, tapi map belum diketahui. Isi Place ID di menu 2."
+    PERNAH_MAP[$p]=0
+    KELUAR_CNT[$p]=0
+    return 1
+  fi
+  tulis "[$(date +%T)] $n keluar map -> rejoin"
+  pesan_fc "$p" "keluar dari map"
+  buka "$p" rejoin
+  PERNAH_MAP[$p]=1
+  KELUAR_CNT[$p]=-9     # beri waktu ~90 detik untuk memuat map; kalau gagal dicoba lagi
+  jeda
+}
+
 launch_semua() {
   cari_roblox
   if [ ${#PAKET[@]} -eq 0 ]; then
@@ -429,10 +525,6 @@ launch_semua() {
   echo "Terdeteksi ${#PAKET[@]} Roblox:"
   for p in "${PAKET[@]}"; do echo " - $p"; done
   echo
-
-  if [ -z "$PLACE_URL" ]; then
-    for p in "${PAKET[@]}"; do deteksi_map "$p"; done
-  fi
 
   local i=0
   for p in "${PAKET[@]}"; do
@@ -474,10 +566,16 @@ timer_habis() {
 # rejoin=1 : kalau Roblox mati, luncurkan lagi ke map terakhir
 # rejoin=0 : hanya mengurus timer
 pantau() {
-  local rejoin="$1" now last=0 lastmap=0 p sisa
+  local rejoin="$1" now last=0 lastmap=0 p sisa n
   STOP=0
   echo
   tulis "Memantau... (CTRL+C untuk berhenti)"
+
+  # mulai dari nol: Roblox harus terlihat masuk map dulu, baru bisa dianggap keluar map
+  for p in "${PAKET[@]}"; do
+    PERNAH_MAP[$p]=0
+    KELUAR_CNT[$p]=0
+  done
 
   while [ "$STOP" = "0" ]; do
     cek_masa_aktif
@@ -492,6 +590,8 @@ pantau() {
         TIMER_JADWAL[$p]=0
         TIMER_MENIT[$p]=0
         pesan_timer "$p" "$JEDA_MS"
+        PERNAH_MAP[$p]=0
+        KELUAR_CNT[$p]=0
       fi
     done
 
@@ -499,19 +599,37 @@ pantau() {
     if [ $((now - last)) -ge 10 ]; then
       last=$now
 
-      for p in "${PAKET[@]}"; do
-        if [ "$rejoin" = "1" ] && ! sedang_jalan "$p"; then
-          # kasih waktu 60 detik setelah peluncuran sebelum dianggap mati
-          if [ $((now - ${MULAI[$p]:-0})) -ge 60 ]; then
-            tulis "[$(date +%T)] $p mati -> diluncurkan ulang"
-            pesan_fc "$p"
-            buka "$p"
-            jeda
+      if [ "$rejoin" = "1" ]; then
+        for p in "${PAKET[@]}"; do
+          n="${p#com.roblox.}"
+          if periksa_map "$p"; then
+            if [ "$ST_DALAM" = "1" ]; then
+              if [ "${PERNAH_MAP[$p]:-0}" != "1" ] || [ "${KELUAR_CNT[$p]:-0}" -ne 0 ]; then
+                tulis "[$(date +%T)] $n: di dalam map"
+              fi
+              PERNAH_MAP[$p]=1
+              KELUAR_CNT[$p]=0
+              if [ -z "$PLACE_URL" ] && [ $((now - lastmap)) -ge 30 ]; then deteksi_map "$p"; fi
+            elif [ "$ST_DALAM" = "0" ] && [ "${PERNAH_MAP[$p]:-0}" = "1" ]; then
+              KELUAR_CNT[$p]=$(( ${KELUAR_CNT[$p]:-0} + 1 ))
+              if [ "${KELUAR_CNT[$p]}" -gt 0 ]; then
+                tulis "[$(date +%T)] $n: tidak di map (${KELUAR_CNT[$p]}/3)"
+              fi
+              if [ "${KELUAR_CNT[$p]}" -ge 3 ]; then rejoin_map "$p"; fi
+            fi
+          else
+            # aplikasi mati (FC): kasih waktu 60 detik setelah peluncuran sebelum dianggap mati
+            if [ $((now - ${MULAI[$p]:-0})) -ge 60 ]; then
+              tulis "[$(date +%T)] $n mati -> diluncurkan ulang"
+              pesan_fc "$p" "aplikasi tertutup (FC)"
+              buka "$p" rejoin
+              PERNAH_MAP[$p]=1
+              KELUAR_CNT[$p]=-9
+              jeda
+            fi
           fi
-        elif [ -z "$PLACE_URL" ] && [ $((now - lastmap)) -ge 30 ]; then
-          deteksi_map "$p"
-        fi
-      done
+        done
+      fi
       if [ $((now - lastmap)) -ge 30 ]; then lastmap=$now; fi
 
       # mode tanpa rejoin: berhenti kalau semua timer sudah habis
@@ -540,7 +658,7 @@ pantau() {
 # ---------- Menu ----------
 baca_map() {
   tulis "Masukkan Place ID atau link private server."
-  tulis "Kosongkan lalu Enter = pakai map terakhir yang dimainkan (otomatis)."
+  tulis "Kosongkan lalu Enter = Roblox hanya dibuka (tidak langsung masuk map). Kalau nanti keluar map atau FC, otomatis masuk lagi ke map terakhir."
   tulis "Contoh: 920587237"
   echo
   read -r -p "Place ID / link: " INPUT
@@ -833,6 +951,39 @@ menu_info() {
   tunggu_enter
 }
 
+# lihat status tiap Roblox secara langsung (untuk memastikan deteksi map bekerja)
+tes_status() {
+  local p n st
+  header
+  cari_roblox
+  if [ ${#PAKET[@]} -eq 0 ]; then
+    tulis "Tidak ada Roblox (com.roblox) yang terdeteksi."
+    tunggu_enter
+    return
+  fi
+  STOP=0
+  tulis "TES STATUS MAP (CTRL+C untuk berhenti)"
+  tulis "Masuk map, lalu keluar map di salah satu Roblox. Perhatikan status berubah."
+  echo
+  while [ "$STOP" = "0" ]; do
+    echo "$(date +%T)"
+    for p in "${PAKET[@]}"; do
+      n="${p#com.roblox.}"
+      if periksa_map "$p"; then
+        if [ "$ST_DALAM" = "1" ]; then st="DI MAP"; elif [ "$ST_DALAM" = "0" ]; then st="BERANDA"; else st="?"; fi
+        echo " $n cpu ${ST_CPU:--}% udp ${ST_UDP} = $st"
+      else
+        echo " $n mati"
+      fi
+    done
+    echo
+    sleep 3
+  done
+  fix_tty
+  echo "Dihentikan."
+  tunggu_enter
+}
+
 # ---------- Program utama ----------
 cek_key
 atur_webhook
@@ -849,7 +1000,8 @@ while true; do
   echo "4. ATUR DELAY"
   echo "5. TUTUP SEMUA ROBLOX"
   echo "6. CEK PERANGKAT"
-  echo "7. KELUAR"
+  echo "7. TES STATUS MAP"
+  echo "8. KELUAR"
   echo
   read -r -p "Pilih: " PILIH
 
@@ -878,7 +1030,8 @@ while true; do
     4) menu_delay ;;
     5) tutup_semua ;;
     6) menu_info ;;
-    7)
+    7) tes_status ;;
+    8)
       echo "Sampai jumpa!"
       exit 0
       ;;
