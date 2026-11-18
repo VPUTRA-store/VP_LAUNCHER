@@ -515,16 +515,81 @@ rejoin_map() {
   jeda
 }
 
-launch_semua() {
+# buyer memilih Roblox mana saja yang akan di-launch (wajib dipilih dulu)
+# hasilnya disimpan di PAKET, jadi launch dan pantau hanya mengurus yang dipilih
+pilih_roblox() {
+  local semua=() p i x pil ok
+  local -A sudah=()
   cari_roblox
   if [ ${#PAKET[@]} -eq 0 ]; then
     tulis "Tidak ada Roblox (com.roblox) yang terdeteksi."
     return 1
   fi
+  semua=("${PAKET[@]}")
 
-  echo "Terdeteksi ${#PAKET[@]} Roblox:"
+  echo "PILIH ROBLOX YANG AKAN DI-LAUNCH"
+  echo
+  i=0
+  for p in "${semua[@]}"; do
+    i=$((i + 1))
+    echo "$i. $p"
+  done
+  echo
+  tulis "Ketik nomornya, pisah dengan spasi atau koma. Contoh: 1 3"
+  tulis "A = semua, 0 = batal"
+  echo
+
+  while true; do
+    read -r -p "Pilih: " pil || { PAKET=(); return 1; }
+    pil="${pil//,/ }"
+    if [ "$pil" = "0" ]; then
+      PAKET=()
+      echo "Dibatalkan."
+      return 1
+    fi
+    if [[ "$pil" =~ ^[[:space:]]*[Aa][[:space:]]*$ ]]; then
+      PAKET=("${semua[@]}")
+      break
+    fi
+    if [ -z "${pil// /}" ]; then
+      echo "Belum ada yang dipilih. Pilih dulu Roblox yang mau di-launch."
+      continue
+    fi
+
+    PAKET=()
+    sudah=()
+    ok=1
+    for x in $pil; do
+      if [[ "$x" =~ ^[0-9]+$ ]]; then
+        x=$((10#$x))
+        if [ "$x" -ge 1 ] && [ "$x" -le ${#semua[@]} ]; then
+          if [ -z "${sudah[$x]:-}" ]; then
+            sudah[$x]=1
+            PAKET+=("${semua[$((x - 1))]}")
+          fi
+          continue
+        fi
+      fi
+      ok=0
+      break
+    done
+    if [ "$ok" = "1" ] && [ ${#PAKET[@]} -gt 0 ]; then break; fi
+    tulis "Pilihan tidak valid. Pakai nomor 1 sampai ${#semua[@]}, atau A untuk semua."
+  done
+
+  echo
+  echo "Dipilih ${#PAKET[@]} Roblox:"
   for p in "${PAKET[@]}"; do echo " - $p"; done
   echo
+  return 0
+}
+
+# membuka Roblox yang sudah dipilih lewat pilih_roblox (isi PAKET)
+launch_semua() {
+  if [ ${#PAKET[@]} -eq 0 ]; then
+    tulis "Belum ada Roblox yang dipilih."
+    return 1
+  fi
 
   local i=0
   for p in "${PAKET[@]}"; do
@@ -539,7 +604,7 @@ launch_semua() {
     if [ $i -lt ${#PAKET[@]} ]; then jeda; fi
   done
   echo
-  echo "Semua Roblox sudah dibuka."
+  echo "Semua Roblox yang dipilih sudah dibuka."
   return 0
 }
 
@@ -1009,14 +1074,14 @@ while true; do
     1)
       header
       PLACE_URL=""
-      if launch_semua; then
+      if pilih_roblox && launch_semua; then
         if ada_timer; then pantau 0; fi
       fi
       tunggu_enter
       ;;
     2)
       header
-      if tanya_map; then
+      if pilih_roblox && tanya_map; then
         PLACE_URL="$MAP_HASIL"
         echo
         if launch_semua; then
