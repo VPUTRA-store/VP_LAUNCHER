@@ -1,2 +1,2 @@
 #db=https://vp-launcher-default-rtdb.asia-southeast1.firebasedatabase.app
-eaca961c64ddbd0c5489bb2a69c7875b170d848ec46cdbcbdf13b493dc4ab8b6|7|B
+eaca961c64ddbd0c5489bb2a69c7875b170d848ec46cdbcbdf13b493dc4ab8b6|7
