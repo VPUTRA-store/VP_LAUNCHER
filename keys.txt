@@ -1,2 +1,2 @@
 #db=https://vp-launcher-default-rtdb.asia-southeast1.firebasedatabase.app
-# belum ada key
+f82403cc469091bc09d5aa455cb9a1b7c5b60e88ae488b6961e3681c32660418|100
